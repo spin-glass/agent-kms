@@ -318,13 +318,21 @@ Apple-Silicon Macs with ≥18 GB unified memory.
 ## Roadmap
 
 Planned retrieval improvements (hybrid BM25, Contextual Retrieval, HyDE,
-Multi-Query, Step-Back) with the problems they target, papers, and
-implementation notes are tracked in
+Multi-Query, Step-Back, query intent extraction) with the problems they
+target, papers, and implementation notes are tracked in
 [`docs/retrieval-roadmap.md`](docs/retrieval-roadmap.md).
 
 Each item is gated by validation in
 [rag-evaluation-jp](https://github.com/spin-glass/rag-evaluation-jp) —
 no defaults change without an empirical result on at least one corpus.
+
+## RAG reference
+
+For background on the techniques the roadmap discusses
+(chunking strategies, embedding model selection, hybrid retrieval,
+reranking, evaluation metrics, common failure modes), see
+[`docs/rag-primer.md`](docs/rag-primer.md) — a "frequently-asked points"
+reference with decision tables and agent-kms-specific notes per topic.
 
 ---
 
