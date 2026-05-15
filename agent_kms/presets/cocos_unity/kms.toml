@@ -1,0 +1,157 @@
+# Cocos2d-x → Unity migration preset (extracted from the CalcioA project).
+#
+# This preset mirrors the configuration used in the source project the
+# package was extracted from. Use it as a reference for projects that share
+# the "1:1 port from a legacy engine to a target engine" shape.
+
+[store]
+collection = "migration_knowledge"
+
+[knowledge]
+root = "."
+
+[retrieve]
+score_threshold = 0.93
+
+[retrieve.severity_boost]
+critical = 0.05
+high = 0.025
+default = 0.0
+
+[retrieve.applicability_boost]
+universal = 0.0
+conditional = -0.005
+topic-specific = -0.015
+
+[[ingest.sources]]
+name = "known_issue"
+kind = "markdown_h2"
+roots = ["docs/known-issues"]
+default_severity = "default"
+default_applicability = "topic-specific"
+default_confidence = 1.0
+min_chars = 100
+
+[[ingest.sources]]
+name = "playbook"
+kind = "markdown_h2"
+roots = ["docs/workflows"]
+default_severity = "high"
+default_applicability = "conditional"
+default_confidence = 1.0
+min_chars = 200
+
+[[ingest.sources]]
+name = "instinct"
+kind = "yaml_file"
+roots = ["data/instincts"]
+default_severity = "default"
+default_applicability = "topic-specific"
+default_confidence = 1.0
+
+[ingest.sources.options]
+frontmatter_field = "domain"
+severity_field = "severity"
+confidence_field = "confidence"
+
+[session_extract]
+tail_turns = 30
+min_confidence = 0.85
+forbidden_vocab = [
+    "skeleton",
+    "placeholder",
+    "minimal",
+    "defer",
+    "scope-narrow",
+    "dummy",
+    "仮実装",
+    "今回のみ",
+    "スコープ縮小",
+]
+
+# Domain → applicability map (instinct YAML frontmatter field "domain").
+[domain_applicability]
+workflow = "universal"
+cocos-parity = "universal"
+asset-management = "universal"
+coordinate-system = "universal"
+data-pipeline = "universal"
+data-flow = "universal"
+ui-port = "universal"
+completion-honesty = "universal"
+meta-workflow = "universal"
+unity-ui = "conditional"
+unity-ui-layout = "conditional"
+unity-ui-animation = "conditional"
+ui-layout = "conditional"
+rendering = "conditional"
+animation = "conditional"
+api-usage = "conditional"
+ss6pu-rendering = "topic-specific"
+ss6pu-animation = "topic-specific"
+debugging = "topic-specific"
+
+# File-level severity/applicability overrides keyed by path relative to root.
+[file_severity."docs/cocos-unity-mapping.md"]
+severity = "critical"
+applicability = "universal"
+
+[file_severity."docs/workflows/cocos-ui-implementation-playbook.md"]
+severity = "critical"
+applicability = "universal"
+
+[file_severity."docs/workflows/cocos-ui-layout-port-playbook.md"]
+severity = "critical"
+applicability = "universal"
+
+[file_severity."docs/known-issues/cocos-ui-conventions-checklist.md"]
+severity = "critical"
+applicability = "universal"
+
+[file_severity."docs/known-issues/cocos-setlabel-align-translation.md"]
+severity = "critical"
+applicability = "universal"
+
+[file_severity."docs/known-issues/cocos-y-axis-arithmetic-translation.md"]
+severity = "critical"
+applicability = "universal"
+
+[file_severity."docs/known-issues/cocos-label-anchor-convention.md"]
+severity = "high"
+applicability = "conditional"
+
+[file_severity."docs/known-issues/cocos-sprite-vs-unity-solid-color.md"]
+severity = "high"
+applicability = "conditional"
+
+[file_severity."docs/known-issues/iconmenu-lifecycle.md"]
+severity = "high"
+applicability = "conditional"
+
+[file_severity."docs/known-issues/ui-runtime-hack-ban.md"]
+severity = "high"
+applicability = "universal"
+
+# Auto-improve rules: regex over user prompts → expected source file.
+# When the expected source is absent from retrieve top-N, append matched
+# symptom phrases to the file's keyword block.
+
+[[auto_improve.rules]]
+id = "default-initialized-all-rows-same"
+regex = "(全\\s*\\d*\\s*行が?同じ|背後に透けて|ghost\\s*text|重複表示|配列の中身が?\\s*default)"
+expected_source = "data/instincts/default-initialized-fields-not-populated.yaml"
+
+[[auto_improve.rules]]
+id = "real-data-claim-before-verify"
+regex = "(real\\s*data\\s*に?繋|実\\s*デ[ータ]タ.*?接続|本番同等のデータ|savedata\\s*から?読んで)"
+expected_source = "data/instincts/verify-game-state-in-cocos-source.yaml"
+
+[[auto_improve.rules]]
+id = "completion-gate-before-multi-axis"
+regex = "(Completion\\s*Gate\\s*Report|完了報告|GATE\\s*PASSED|完了宣言)"
+expected_source = "data/instincts/cocos-ui-multi-axis-parity-before-complete.yaml"
+
+[[auto_improve.rules]]
+id = "symptom-loop-multiple-visual-patches"
+regex = "(symptom\\s*loop|症状ループ|連続\\s*\\d*\\s*commit|繰り返し\\s*patch)"
+expected_source = "data/instincts/cocos-ui-isolated-test-scene-on-symptom-loop.yaml"

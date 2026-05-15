@@ -1,0 +1,1 @@
+faithful adherence to source specifications, prerequisite asset / dependency verification before implementation, established project conventions and checklists, phase-driven implementation workflow, visual / end-to-end verification before completion claim

@@ -1,0 +1,92 @@
+# General-purpose preset for agent-kms.
+#
+# Ingests Markdown (H2-split) and YAML knowledge files from common locations.
+# Customise by copying this file to `.agent-kms/kms.toml` in your project
+# and editing paths / severity rules to taste.
+
+[store]
+collection = "agent_knowledge"
+
+[knowledge]
+# Project root the ``[[ingest.sources]]`` roots are resolved against.
+# Override with the AGENT_KMS_KNOWLEDGE_ROOT environment variable.
+root = "."
+
+[retrieve]
+# Boosted-cosine floor. Tuned for ``intfloat/multilingual-e5-base``.
+score_threshold = 0.93
+
+[retrieve.severity_boost]
+critical = 0.05
+high = 0.025
+default = 0.0
+
+[retrieve.applicability_boost]
+universal = 0.0
+conditional = -0.005
+topic-specific = -0.015
+
+[[ingest.sources]]
+name = "knowledge"
+kind = "markdown_h2"
+roots = ["docs/knowledge", "docs/known-issues"]
+default_severity = "default"
+default_applicability = "topic-specific"
+default_confidence = 1.0
+min_chars = 100
+
+[[ingest.sources]]
+name = "decisions"
+kind = "markdown_h2"
+roots = ["docs/decisions", "docs/adr"]
+default_severity = "high"
+default_applicability = "universal"
+default_confidence = 1.0
+min_chars = 100
+
+[[ingest.sources]]
+name = "instinct"
+kind = "yaml_file"
+roots = ["data/instincts"]
+default_severity = "default"
+default_applicability = "topic-specific"
+default_confidence = 1.0
+
+[ingest.sources.options]
+# Optional: read YAML frontmatter fields and map them to chunk metadata.
+frontmatter_field = "domain"
+severity_field = "severity"
+confidence_field = "confidence"
+
+[session_extract]
+tail_turns = 30
+min_confidence = 0.85
+forbidden_vocab = [
+    "skeleton",
+    "placeholder",
+    "minimal",
+    "defer",
+    "scope-narrow",
+    "dummy",
+]
+
+# Optional per-file overrides keyed by path relative to ``[knowledge].root``.
+# Use this to mark a few high-signal files as ``critical`` / ``universal``.
+# [file_severity."docs/decisions/0001-architecture.md"]
+# severity = "critical"
+# applicability = "universal"
+
+# Optional mapping from YAML ``domain`` field → applicability bucket.
+# [domain_applicability]
+# workflow = "universal"
+# operations = "conditional"
+
+# Optional gap rules consumed by ``agent-kms improve``. Each rule fires when
+# the regex matches a user prompt AND ``expected_source`` is absent from the
+# top-N retrieve results, appending the matched phrases to that file's
+# auto-improve keyword block.
+#
+# [[auto_improve.rules]]
+# id = "example-rule"
+# regex = "(symptom phrase 1|symptom phrase 2)"
+# expected_source = "data/instincts/example.yaml"
