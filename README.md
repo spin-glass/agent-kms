@@ -315,6 +315,19 @@ Apple-Silicon Macs with ≥18 GB unified memory.
 
 ---
 
+## Roadmap
+
+Planned retrieval improvements (hybrid BM25, Contextual Retrieval, HyDE,
+Multi-Query, Step-Back) with the problems they target, papers, and
+implementation notes are tracked in
+[`docs/retrieval-roadmap.md`](docs/retrieval-roadmap.md).
+
+Each item is gated by validation in
+[rag-evaluation-jp](https://github.com/spin-glass/rag-evaluation-jp) —
+no defaults change without an empirical result on at least one corpus.
+
+---
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
