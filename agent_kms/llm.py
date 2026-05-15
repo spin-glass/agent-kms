@@ -3,16 +3,22 @@
 Default chain: Gemini 2.5 Flash (primary, free-tier 250 RPD) -> Haiku 4.5
 fallback. Configurable via env:
 
-    RAG_PROVIDER          auto | gemini | haiku   (default auto)
-    RAG_PROVIDER_FALLBACK gemini | haiku | none   (default haiku)
+    RAG_PROVIDER          auto | gemini | haiku | ollama   (default auto)
+    RAG_PROVIDER_FALLBACK gemini | haiku | ollama | none   (default haiku)
     GEMINI_API_KEY        AIza...
-    GEMINI_MODEL          gemini-2.5-flash         (default)
+    GEMINI_MODEL          gemini-2.5-flash             (default)
     ANTHROPIC_API_KEY     sk-ant-...
-    ANTHROPIC_MODEL       claude-haiku-4-5-20251001 (default)
+    ANTHROPIC_MODEL       claude-haiku-4-5-20251001    (default)
+    OLLAMA_URL            http://localhost:11434       (default)
+    OLLAMA_MODEL          qwen2.5:7b                   (default)
 
 `generate(prompt, ...)` returns `LLMResult` with the text and provenance,
 trying providers in order and falling back on rate-limit / auth / network
 errors.
+
+The Ollama provider exists for fully-local / privacy-sensitive setups
+(no transcript leaves the machine). It is NOT included in the ``auto``
+chain — set ``RAG_PROVIDER=ollama`` explicitly to use it.
 """
 
 from __future__ import annotations
@@ -25,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
 DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
+DEFAULT_OLLAMA_MODEL = "qwen2.5:7b"
+DEFAULT_OLLAMA_URL = "http://localhost:11434"
 
 _PLACEHOLDER_PATTERNS = (
     "REPLACE_ME",
@@ -127,11 +135,93 @@ class _AnthropicProvider:
         return LLMResult(text=text, provider=self.name, model=self.model)
 
 
+class _OllamaProvider:
+    """Local Ollama daemon (http://localhost:11434 by default).
+
+    Uses stdlib urllib so no extra dependency is required. ``response_schema``
+    is silently ignored — Ollama's ``format=json`` enforces only that the
+    output is valid JSON, not a particular shape (parallel to the Anthropic
+    provider). Prompts must instruct the model on the desired schema.
+    """
+
+    name = "ollama"
+
+    def __init__(self, model: str | None = None):
+        import json
+        import urllib.error
+        import urllib.request
+
+        self._json = json
+        self._urlreq = urllib.request
+        self._urlerr = urllib.error
+
+        self.model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
+        self.base_url = os.environ.get("OLLAMA_URL", DEFAULT_OLLAMA_URL).rstrip("/")
+
+        # Liveness probe — fail fast if the daemon isn't up so the fallback
+        # chain can try the next provider.
+        try:
+            req = urllib.request.Request(f"{self.base_url}/api/tags", method="GET")
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                resp.read()
+        except (urllib.error.URLError, OSError, TimeoutError) as e:
+            raise RuntimeError(
+                f"Ollama unreachable at {self.base_url} ({type(e).__name__}: {e}). "
+                f"Hint: start the server with `ollama serve` "
+                f"and pull the model with `ollama pull {self.model}`."
+            ) from e
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int = 1024,
+        temperature: float = 0.0,
+        json_mode: bool = False,
+        response_schema: object | None = None,
+    ) -> LLMResult:
+        payload: dict = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+            },
+            "stream": False,
+        }
+        if json_mode or response_schema is not None:
+            payload["format"] = "json"
+
+        data = self._json.dumps(payload).encode("utf-8")
+        req = self._urlreq.Request(
+            f"{self.base_url}/api/chat",
+            data=data,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            # Initial model load can take 10-30s; total generation up to ~3 min
+            # for a 14B-class model on Mac. 180s covers most cases.
+            with self._urlreq.urlopen(req, timeout=180) as resp:
+                body = self._json.loads(resp.read().decode("utf-8"))
+        except self._urlerr.HTTPError as e:
+            detail = e.read().decode("utf-8", errors="replace")[:500]
+            raise RuntimeError(
+                f"Ollama HTTP {e.code}: {detail}. "
+                f"Hint: model {self.model!r} may not be pulled — "
+                f"run `ollama pull {self.model}`."
+            ) from e
+        text = body.get("message", {}).get("content", "")
+        return LLMResult(text=text, provider=self.name, model=self.model)
+
+
 def _construct(name: str):
     if name == "gemini":
         return _GeminiProvider()
     if name in ("haiku", "anthropic", "claude"):
         return _AnthropicProvider()
+    if name == "ollama":
+        return _OllamaProvider()
     raise RuntimeError(f"unknown provider: {name}")
 
 
@@ -171,17 +261,21 @@ def generate(
     response_schema: object | None = None,
     gemini_model: str | None = None,
     anthropic_model: str | None = None,
+    ollama_model: str | None = None,
 ) -> LLMResult:
     """Per-call tier override:
-        gemini_model / anthropic_model — pin the model for this call only.
+        gemini_model / anthropic_model / ollama_model — pin the model for
+            this call only.
         response_schema — Gemini-only structured-output schema (Pydantic /
-            list[str] / dict). Ignored by Anthropic; rely on prompt for JSON.
+            list[str] / dict). Ignored by Anthropic and Ollama; rely on
+            prompt + ``json_mode=True`` for JSON on those providers.
     """
     chain = _build_chain()
     if not chain:
         raise RuntimeError(
-            "No LLM provider available. Set GEMINI_API_KEY (free tier ok) "
-            "and/or ANTHROPIC_API_KEY in tools/rag/.env"
+            "No LLM provider available. Set GEMINI_API_KEY (free tier ok), "
+            "ANTHROPIC_API_KEY, or RAG_PROVIDER=ollama with `ollama serve` "
+            "running locally."
         )
 
     # Apply per-call model overrides
@@ -190,6 +284,8 @@ def generate(
             p.model = gemini_model
         elif p.name == "anthropic" and anthropic_model:
             p.model = anthropic_model
+        elif p.name == "ollama" and ollama_model:
+            p.model = ollama_model
 
     last_err: Exception | None = None
     for provider in chain:

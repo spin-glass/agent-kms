@@ -22,12 +22,44 @@ COLLECTION = os.environ.get("AGENT_KMS_COLLECTION", "agent_knowledge")
 MODEL_NAME = os.environ.get("AGENT_KMS_MODEL", "intfloat/multilingual-e5-base")
 VECTOR_SIZE = int(os.environ.get("AGENT_KMS_VECTOR_SIZE", "768"))
 
+
+def _resolve_collection() -> str:
+    """Resolve the active collection name.
+
+    Precedence: ``AGENT_KMS_COLLECTION`` env > project ``kms.toml``
+    ``[store].collection`` > ``"agent_knowledge"`` default. The module-level
+    ``COLLECTION`` constant only honours env + default, so callers that need
+    project-level config (``ensure_collection``, ``retrieve._collection``)
+    must go through this helper. Resolved on every call so a single Python
+    process can switch projects via ``chdir`` + ``config.reset_cache``.
+    """
+    env = os.environ.get("AGENT_KMS_COLLECTION", "")
+    if env:
+        return env
+    try:
+        # Local import to avoid a circular dependency at module load time.
+        from .config import load_config
+
+        return load_config().collection
+    except Exception:
+        return "agent_knowledge"
+
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 
 
 @lru_cache(maxsize=1)
 def get_model() -> SentenceTransformer:
-    return SentenceTransformer(MODEL_NAME)
+    m = SentenceTransformer(MODEL_NAME)
+    # Cap the sequence length to keep attention memory bounded. ModernBERT-
+    # based models (e.g. ``cl-nagoya/ruri-v3-*``) ship with
+    # ``max_seq_length=8192``; SDPA attention then allocates tens of GiB of
+    # buffers and OOMs on CPU and consumer GPUs. The ingest pipeline tokenises
+    # H2 sections that are typically a few hundred characters, so 512 is more
+    # than enough. Models that already specify ≤512 (e.g. e5-base) are left
+    # untouched.
+    if getattr(m, "max_seq_length", 0) and m.max_seq_length > 512:
+        m.max_seq_length = 512
+    return m
 
 
 @lru_cache(maxsize=1)
@@ -36,14 +68,15 @@ def get_client() -> QdrantClient:
 
 
 def ensure_collection(reset: bool = False) -> None:
+    name = _resolve_collection()
     client = get_client()
-    exists = client.collection_exists(COLLECTION)
+    exists = client.collection_exists(name)
     if exists and reset:
-        client.delete_collection(COLLECTION)
+        client.delete_collection(name)
         exists = False
     if not exists:
         client.create_collection(
-            COLLECTION,
+            name,
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
         )
 

@@ -50,10 +50,14 @@ Requires Python ≥ 3.12 and Docker (for Qdrant).
 
 ```bash
 # 1. Start Qdrant
-docker compose -f $(python -c "import agent_kms, pathlib; print(pathlib.Path(agent_kms.__file__).parent.parent / 'compose.yaml')") up -d
-#  or simpler:
+#    Simplest option:
 docker run -d --name agent-kms-qdrant -p 6333:6333 \
-    -v ~/qdrant_data:/qdrant/storage qdrant/qdrant
+    -v ~/qdrant_data:/qdrant/storage qdrant/qdrant:v1.18.0
+#    Or use the reference compose.yaml shipped with the source tree
+#    (`examples/compose.yaml` in the cloned repo / sdist).
+#    For long-term personal use, manage Qdrant from a dedicated infra
+#    directory rather than from inside this library — see
+#    ~/dev/infra/local-llm-stack/ (author's setup).
 
 # 2. Scaffold project config
 cd /path/to/your/project
@@ -181,8 +185,35 @@ prompts by placing them under `.agent-kms/prompts/` and pointing
 | `AGENT_KMS_VECTOR_SIZE`          | `768`                                | Must match the model               |
 | `GEMINI_API_KEY`                 | (unset)                              | Primary LLM provider               |
 | `ANTHROPIC_API_KEY`              | (unset)                              | Fallback LLM provider              |
-| `RAG_PROVIDER`                   | `auto`                               | `auto` / `gemini` / `haiku`        |
+| `OLLAMA_URL`                     | `http://localhost:11434`             | Local Ollama daemon endpoint       |
+| `OLLAMA_MODEL`                   | `qwen2.5:7b`                         | Local model tag                    |
+| `RAG_PROVIDER`                   | `auto`                               | `auto` / `gemini` / `haiku` / `ollama` |
 | `AGENT_KMS_RETRIEVE_THRESHOLD`   | `0.93`                               | Used by the auto-retrieve hook     |
+
+---
+
+## Local LLM (Ollama) for privacy-sensitive setups
+
+When transcripts contain customer data or other information that must not
+leave the machine, point lesson extraction at a local Ollama daemon:
+
+```bash
+brew install ollama && ollama serve            # in a separate shell
+ollama pull qwen2.5:7b                         # or qwen2.5:14b for higher quality
+
+export RAG_PROVIDER=ollama
+export OLLAMA_MODEL=qwen2.5:7b
+agent-kms doctor                                # verifies daemon + model
+```
+
+No code paths send transcripts off the host once `RAG_PROVIDER=ollama` is
+set. Embedding and retrieval are already 100% local (a SentenceTransformer
+model running on CPU/GPU), so the full Retrieve + Extract loop becomes
+offline-capable.
+
+Quality notes: 7B-class models produce valid JSON but may emit thinner
+lessons. 14B-class (`qwen2.5:14b`) is the recommended sweet spot on
+Apple-Silicon Macs with ≥18 GB unified memory.
 
 ---
 
@@ -190,8 +221,21 @@ prompts by placing them under `.agent-kms/prompts/` and pointing
 
 - The default embedding model (`multilingual-e5-base`) downloads ~1 GB on
   first use. Run `agent-kms doctor` to check the cache.
-- Threshold tuning (0.93) is empirical for one corpus. Drop to ~0.85 for
-  smaller / English-only corpora; raise to ~0.95 for stricter matches.
+- **`score_threshold=0.93` is corpus-specific.** It was tuned on the
+  original migration project's corpus. On other Japanese technical
+  documentation corpora the empirical sweet spot has been observed in
+  the **0.80 – 0.85 range** (see [rag-evaluation-jp][rag-eval] for a
+  reproducible study on React JP / JS Primer JP). If `retrieve` returns
+  zero chunks on your data, sweep `score_threshold` downward in 0.01
+  steps starting from 0.85 before assuming the corpus is the problem.
+- **Embedding model choice is the largest lever on Japanese corpora.**
+  The same study found `cl-nagoya/ruri-v3-310m` (also 768d, drop-in
+  swap via `AGENT_KMS_MODEL`) raised F1 by ~80% over `multilingual-e5-base`
+  on Japanese-only documentation. agent-kms keeps `multilingual-e5-base`
+  as the default for broad applicability; consider switching when your
+  corpus is Japanese-heavy.
+
+[rag-eval]: https://github.com/spin-glass/rag-evaluation-jp
 - LLM-based lesson extraction is best-effort. Forbidden-vocab filters
   catch obvious sludge but not subtle low-quality output.
 - Hook templates assume `agent-kms` is on `$PATH` (pipx / global pip

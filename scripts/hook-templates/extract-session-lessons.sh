@@ -11,7 +11,8 @@
 #   - transcript missing
 #   - stop_hook_active true (recursion guard)
 #   - Qdrant unreachable
-#   - no LLM API key set
+#   - no LLM provider configured
+#       (no GEMINI / ANTHROPIC key AND RAG_PROVIDER is not ``ollama``)
 #
 # Logs to $HOME/.claude/logs/agent-kms-stop.log
 # =============================================================================
@@ -50,8 +51,13 @@ except Exception:
 QDRANT_URL="${QDRANT_URL:-http://localhost:6333}"
 curl -sSf -m 1 "${QDRANT_URL%/}/collections" >/dev/null 2>&1 || exit 0
 
-if [ -z "$GEMINI_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
-  echo "[$(date +%FT%T)] no LLM API key set, skipping" >>"$LOG_FILE"
+# LLM gate: skip only when no provider is configured at all.
+# - cloud: at least one of GEMINI_API_KEY / ANTHROPIC_API_KEY non-empty
+# - local: RAG_PROVIDER == "ollama" (Ollama needs no key, just a running daemon)
+if [ "$RAG_PROVIDER" != "ollama" ] \
+   && [ -z "$GEMINI_API_KEY" ] \
+   && [ -z "$ANTHROPIC_API_KEY" ]; then
+  echo "[$(date +%FT%T)] no LLM provider configured, skipping" >>"$LOG_FILE"
   exit 0
 fi
 

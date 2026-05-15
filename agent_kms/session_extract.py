@@ -188,6 +188,47 @@ def read_transcript_tail(path: Path, n_turns: int) -> str:
     return "\n\n".join(parts)
 
 
+def _coerce_to_list_of_dicts(parsed: object) -> list[dict]:
+    """Adapter that accepts every common JSON shape a small LLM may emit
+    instead of the requested top-level array.
+
+    Smaller open-source models (qwen2.5:7b, llama3.1:8b, etc.) frequently
+    fail to follow "return only a JSON array" and instead emit:
+      a. ``[{...}, {...}]``                          ← canonical (passthrough)
+      b. ``{"text": "...", "confidence": 0.9}``      ← single object
+      c. ``{"lessons": [{...}, {...}]}``             ← wrapped under any key
+      d. ``{"tips_for_naming_X": [{...}]}``          ← same, arbitrary key
+
+    Returning ``[]`` for these recoverable shapes silently drops legitimate
+    extractions. Recover them; the downstream filters (forbidden vocab,
+    confidence floor, dedup) still gate quality.
+
+    Args:
+        parsed: result of ``json.loads`` — any Python value.
+
+    Returns:
+        ``list[dict]`` (possibly empty). Non-dict entries are filtered out.
+    """
+    if isinstance(parsed, list):
+        return [x for x in parsed if isinstance(x, dict)]
+    if isinstance(parsed, dict):
+        # Shape (b): single lesson object directly. Heuristic: it carries
+        # the canonical "text" field. (anti-patterns additionally require
+        # "title"; the per-item validation downstream rejects mismatches.)
+        if isinstance(parsed.get("text"), str):
+            print("  llm output: recovered single-object → 1-element list", file=sys.stderr)
+            return [parsed]
+        # Shape (c/d): wrapper object — find the first list value and unwrap.
+        for k, v in parsed.items():
+            if isinstance(v, list):
+                print(
+                    f"  llm output: recovered wrapper '{k}' → {len(v)}-element list",
+                    file=sys.stderr,
+                )
+                return [x for x in v if isinstance(x, dict)]
+    return []
+
+
 def extract_lessons(transcript_tail: str, max_chars: int = 60000) -> list[dict]:
     if not transcript_tail.strip():
         return []
@@ -209,16 +250,15 @@ def extract_lessons(transcript_tail: str, max_chars: int = 60000) -> list[dict]:
     text = re.sub(r"^```(?:json)?\s*\n?", "", text)
     text = re.sub(r"\n?```\s*$", "", text)
     try:
-        lessons = json.loads(text)
+        parsed = json.loads(text)
     except json.JSONDecodeError:
         print("  llm output was not valid JSON; skipping", file=sys.stderr)
         return []
-    if not isinstance(lessons, list):
-        return []
+    lessons = _coerce_to_list_of_dicts(parsed)
     return [
         l
         for l in lessons
-        if isinstance(l, dict) and isinstance(l.get("text"), str) and l["text"].strip()
+        if isinstance(l.get("text"), str) and l["text"].strip()
     ]
 
 
@@ -305,16 +345,13 @@ def extract_anti_patterns(transcript_tail: str, max_chars: int = 60000) -> list[
     text = re.sub(r"^```(?:json)?\s*\n?", "", text)
     text = re.sub(r"\n?```\s*$", "", text)
     try:
-        items = json.loads(text)
+        parsed = json.loads(text)
     except json.JSONDecodeError:
         print("  anti-pattern LLM output not valid JSON; skipping", file=sys.stderr)
         return []
-    if not isinstance(items, list):
-        return []
+    items = _coerce_to_list_of_dicts(parsed)
     out = []
     for it in items:
-        if not isinstance(it, dict):
-            continue
         body = it.get("text", "").strip()
         title = it.get("title", "").strip()
         if not body or not title:

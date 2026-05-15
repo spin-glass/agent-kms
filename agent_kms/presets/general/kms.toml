@@ -13,7 +13,15 @@ collection = "agent_knowledge"
 root = "."
 
 [retrieve]
-# Boosted-cosine floor. Tuned for ``intfloat/multilingual-e5-base``.
+# Boosted-cosine floor. Tuned for ``intfloat/multilingual-e5-base`` on the
+# original migration corpus. **This value is corpus-specific.** On Japanese
+# technical documentation corpora the empirical sweet spot is often in the
+# 0.80–0.85 range — calibrate with a small labelled set when deploying.
+#
+# Embedding model note: for predominantly-Japanese corpora, set
+# ``AGENT_KMS_MODEL=cl-nagoya/ruri-v3-310m`` (also 768d, no Qdrant schema
+# change). Then re-ingest with ``--reset`` and re-calibrate ``score_threshold``
+# — see the agent-kms README "Limitations" section for details.
 score_threshold = 0.93
 
 [retrieve.severity_boost]

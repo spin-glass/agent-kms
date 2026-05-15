@@ -28,9 +28,10 @@ from .store import encode_query, get_client
 
 
 def _collection() -> str:
-    # Resolved lazily so AGENT_KMS_COLLECTION env / project config is honoured.
-    from .store import COLLECTION
-    return COLLECTION
+    # Resolved lazily so AGENT_KMS_COLLECTION env AND project kms.toml
+    # ``[store].collection`` are both honoured (env wins).
+    from .store import _resolve_collection
+    return _resolve_collection()
 
 # severity → additive score boost. Tuned for cosine ranges 0.78-0.92.
 DEFAULT_SEVERITY_BOOST = {

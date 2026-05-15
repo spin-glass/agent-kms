@@ -1,0 +1,21 @@
+# Reference docker-compose for Qdrant. Provided here so newcomers cloning
+# agent-kms can `docker compose -f examples/compose.yaml up -d` and have a
+# working stack in one command.
+#
+# For ongoing personal/team use, prefer running Qdrant from a dedicated
+# infrastructure directory so the database lifecycle is decoupled from
+# agent-kms's library code releases. The author's personal setup lives at
+# ~/dev/infra/local-llm-stack/ (uses a bind mount + Makefile + healthcheck).
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.18.0
+    container_name: agent-kms-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+volumes:
+  qdrant_data:

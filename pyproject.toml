@@ -50,7 +50,7 @@ artifacts = ["agent_kms/presets/**"]
 include = [
     "agent_kms",
     "scripts",
-    "compose.yaml",
+    "examples",
     "README.md",
     "LICENSE",
     "pyproject.toml",

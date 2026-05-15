@@ -179,10 +179,43 @@ def _cmd_doctor(_: argparse.Namespace) -> int:
         print("  ✓ GEMINI_API_KEY set")
     if ant:
         print("  ✓ ANTHROPIC_API_KEY set")
-    if not gem and not ant:
-        print("  ⚠ No LLM API key set — Stop-hook lesson extraction will be skipped")
 
-    # 4. Config
+    # 4. Ollama (only probe if user opted in)
+    rag_provider = os.environ.get("RAG_PROVIDER", "auto").lower()
+    ollama_opted_in = (
+        rag_provider == "ollama"
+        or os.environ.get("RAG_PROVIDER_FALLBACK", "").lower() == "ollama"
+        or bool(os.environ.get("OLLAMA_URL", "").strip())
+        or bool(os.environ.get("OLLAMA_MODEL", "").strip())
+    )
+    if ollama_opted_in:
+        from urllib.error import URLError
+        from urllib.request import Request, urlopen
+
+        ourl = os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+        omodel = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
+        try:
+            req = Request(f"{ourl}/api/tags", method="GET")
+            with urlopen(req, timeout=2) as resp:
+                import json as _json
+
+                tags = _json.loads(resp.read().decode("utf-8")).get("models", [])
+                names = {t.get("name", "") for t in tags}
+                if any(omodel == n or n.startswith(omodel + ":") for n in names):
+                    print(f"  ✓ Ollama reachable at {ourl}, model {omodel!r} pulled")
+                else:
+                    print(
+                        f"  ⚠ Ollama reachable at {ourl} but model {omodel!r} not "
+                        f"pulled — run `ollama pull {omodel}`"
+                    )
+        except (URLError, OSError, TimeoutError) as e:
+            print(f"  ✗ Ollama NOT reachable at {ourl}: {e}")
+            ok = False
+
+    if not gem and not ant and not ollama_opted_in:
+        print("  ⚠ No LLM provider set — Stop-hook lesson extraction will be skipped")
+
+    # 5. Config
     try:
         from .config import load_config
 
