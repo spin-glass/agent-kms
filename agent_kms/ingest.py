@@ -125,23 +125,32 @@ def upsert_chunks(cfg: KMSConfig, chunks: list[Chunk], *, batch: int = 64) -> in
     for i in range(0, len(chunks), batch):
         slice_ = chunks[i : i + batch]
         vectors = encode_passages([c.embed_text for c in slice_])
-        points = [
-            PointStruct(
-                id=stable_id(f"{c.source_type}:{c.source_file}#{c.heading}"),
-                vector=vec,
-                payload={
-                    "text": c.body,
-                    "heading": c.heading,
-                    "source_file": c.source_file,
-                    "source_type": c.source_type,
-                    "severity": c.severity,
-                    "applicability": c.applicability,
-                    "confidence": c.confidence,
-                    "tags": c.tags,
-                },
+        points = []
+        for c, vec in zip(slice_, vectors):
+            payload = {
+                "text": c.body,
+                "heading": c.heading,
+                "source_file": c.source_file,
+                "source_type": c.source_type,
+                "severity": c.severity,
+                "applicability": c.applicability,
+                "confidence": c.confidence,
+                "tags": c.tags,
+            }
+            # Optional frontmatter-derived fields — only added when present
+            # so legacy chunks without a frontmatter block keep their
+            # original payload shape and stable_id rebuild stays minimal.
+            if c.source_pr:
+                payload["source_pr"] = c.source_pr
+            if c.captured_at:
+                payload["captured_at"] = c.captured_at
+            points.append(
+                PointStruct(
+                    id=stable_id(f"{c.source_type}:{c.source_file}#{c.heading}"),
+                    vector=vec,
+                    payload=payload,
+                )
             )
-            for c, vec in zip(slice_, vectors)
-        ]
         client.upsert(collection_name=cfg.collection, points=points)
         total += len(points)
     return total

@@ -11,8 +11,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
+import yaml
+
 H2_RE = re.compile(r"^## (.+)$", re.MULTILINE)
 H1_RE = re.compile(r"^# (.+)$", re.MULTILINE)
+
+# Matches a leading YAML frontmatter block: '---\n<yaml>\n---\n' at file start.
+# Captured group 1 is the YAML body so the caller can ``yaml.safe_load`` it.
+_FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---\r?\n", re.DOTALL)
 
 
 @dataclass
@@ -25,6 +31,10 @@ class Chunk:
     confidence: float = 1.0
     source_type: str = "knowledge"
     tags: list[str] = field(default_factory=list)
+    # Optional frontmatter-sourced extras. Empty defaults so legacy chunks
+    # without a frontmatter block round-trip unchanged.
+    source_pr: str = ""
+    captured_at: str = ""
 
     @property
     def embed_text(self) -> str:
@@ -70,6 +80,35 @@ def split_markdown_by_h2(text: str) -> list[tuple[str, str]]:
     return chunks
 
 
+def _parse_markdown_frontmatter(text: str) -> tuple[dict, str]:
+    """Strip a leading YAML frontmatter block. Returns ``(meta, body)``.
+
+    A file without a frontmatter block returns ``({}, text)`` unchanged, so
+    callers can blindly chain this in front of existing chunking logic.
+    Malformed YAML is treated as "no frontmatter" (silent) — partial files
+    should not crash an ingest run.
+    """
+    m = _FRONTMATTER_RE.match(text)
+    if not m:
+        return {}, text
+    try:
+        meta = yaml.safe_load(m.group(1))
+    except yaml.YAMLError:
+        return {}, text
+    if not isinstance(meta, dict):
+        return {}, text
+    return meta, text[m.end():]
+
+
+def _coerce_tags(value: object) -> list[str]:
+    """YAML tags can be either a list (canonical) or a comma string. Normalise."""
+    if isinstance(value, list):
+        return [str(t).strip() for t in value if str(t).strip()]
+    if isinstance(value, str):
+        return [t.strip() for t in value.split(",") if t.strip()]
+    return []
+
+
 def chunk_markdown_h2(
     root: Path,
     glob: str = "*.md",
@@ -80,22 +119,58 @@ def chunk_markdown_h2(
     default_confidence: float = 1.0,
     source_type: str = "knowledge",
 ) -> Iterable[Chunk]:
-    """Yield one chunk per H2 section under ``root``."""
+    """Yield one chunk per H2 section under ``root``.
+
+    A leading YAML frontmatter block is parsed once per file and its values
+    override the per-source defaults for every chunk derived from the file.
+    Recognised keys: ``severity``, ``applicability``, ``confidence``,
+    ``tags``, ``source_pr``, ``captured_at``. Unknown keys are ignored
+    (forward-compatible).
+
+    File-level overrides via ``kms.toml`` ``[file_severity]`` still apply
+    on top of frontmatter — they run later in ``ingest._apply_file_overrides``.
+    """
     if not root.exists():
         return
     for md_path in sorted(root.glob(glob)):
         text = md_path.read_text(encoding="utf-8")
-        for heading, body in split_markdown_by_h2(text):
-            if len(body) < min_chars:
+        meta, body = _parse_markdown_frontmatter(text)
+
+        severity = str(meta.get("severity") or default_severity)
+        applicability = str(meta.get("applicability") or default_applicability)
+        try:
+            confidence = float(meta.get("confidence", default_confidence))
+        except (TypeError, ValueError):
+            confidence = default_confidence
+        tags = _coerce_tags(meta.get("tags"))
+        source_pr = str(meta.get("source_pr") or "")
+        # PyYAML auto-parses unquoted ISO timestamps to ``datetime`` and the
+        # default ``str()`` then loses the canonical "T" separator. Use
+        # ``isoformat()`` when available so payload values stay sortable
+        # ``YYYY-MM-DDTHH:MM:SS`` strings regardless of how the value was
+        # written in the frontmatter.
+        captured_raw = meta.get("captured_at")
+        if captured_raw is None or captured_raw == "":
+            captured_at = ""
+        elif hasattr(captured_raw, "isoformat"):
+            captured_at = captured_raw.isoformat()
+        else:
+            captured_at = str(captured_raw)
+
+        for heading, body_text in split_markdown_by_h2(body):
+            if len(body_text) < min_chars:
                 continue
             yield Chunk(
                 source_file=str(md_path),
                 heading=heading,
-                body=body,
-                severity=default_severity,
-                applicability=default_applicability,
-                confidence=default_confidence,
+                body=body_text,
+                severity=severity,
+                applicability=applicability,
+                confidence=confidence,
                 source_type=source_type,
+                tags=list(tags),  # copy so per-chunk edits don't leak
+                source_pr=source_pr,
+                captured_at=captured_at,
             )
 
 

@@ -46,6 +46,62 @@ def test_chunk_markdown_h2(tmp_path: Path):
     assert "Section B" in headings
 
 
+def test_chunk_markdown_h2_frontmatter(tmp_path: Path):
+    """YAML frontmatter on a markdown file must override per-source defaults
+    and propagate optional fields (``source_pr``, ``captured_at``, ``tags``)
+    onto every chunk derived from the file.
+    """
+    from agent_kms.chunker import chunk_markdown_h2
+
+    md = tmp_path / "pr-lesson.md"
+    md.write_text(
+        "---\n"
+        "captured_at: 2026-05-15T16:00:00\n"
+        "severity: critical\n"
+        "applicability: universal\n"
+        "tags: [prisma, import]\n"
+        "source_pr: https://github.com/o/r/pull/123\n"
+        "---\n\n"
+        "# Title\n\n"
+        "## Section A\n" + "a" * 200 + "\n\n"
+        "## Section B\n" + "b" * 200 + "\n"
+    )
+
+    chunks = list(
+        chunk_markdown_h2(
+            tmp_path,
+            min_chars=100,
+            # These defaults must be overridden by the frontmatter values.
+            default_severity="default",
+            default_applicability="topic-specific",
+        )
+    )
+    assert len(chunks) >= 2
+    for c in chunks:
+        assert c.severity == "critical"             # frontmatter wins over default
+        assert c.applicability == "universal"
+        assert "prisma" in c.tags and "import" in c.tags
+        assert c.source_pr == "https://github.com/o/r/pull/123"
+        assert c.captured_at == "2026-05-15T16:00:00"
+
+
+def test_chunk_markdown_h2_no_frontmatter_unchanged(tmp_path: Path):
+    """Legacy markdown without a frontmatter block must round-trip with
+    per-source defaults intact and the new optional fields empty.
+    """
+    from agent_kms.chunker import chunk_markdown_h2
+
+    md = tmp_path / "legacy.md"
+    md.write_text("# Title\n\n## Section\n" + "x" * 200)
+    chunks = list(chunk_markdown_h2(tmp_path, min_chars=100, default_severity="high"))
+    assert chunks
+    for c in chunks:
+        assert c.severity == "high"        # default preserved
+        assert c.source_pr == ""           # empty optional field
+        assert c.captured_at == ""
+        assert c.tags == []
+
+
 def test_chunk_yaml_per_file(tmp_path: Path):
     from agent_kms.chunker import chunk_yaml_per_file
 
