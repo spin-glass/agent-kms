@@ -42,6 +42,14 @@ Known weaknesses, in rough priority order:
    to match.
 4. **No-evidence queries** still produce some chunks above threshold for
    topical-but-not-answering text.
+5. **Query = full user prompt (verbatim)**. The auto-retrieve hook embeds
+   the raw `UserPromptSubmit` text without extracting the search intent.
+   For conversational prompts like
+   `"問題を整理してください。別リポジトリで一般的な状況を用意して実験してみます。"`
+   the embedding mixes multiple intents and chat-glue tokens, producing
+   a noisy query vector. Observed effect (2026-05-15, 196-chunk
+   collection, threshold 0.85): single prompts returning 48–120 hits
+   each, blowing up the context budget. See §5 below.
 
 Each roadmap item below targets one or more of these.
 
@@ -253,7 +261,103 @@ considering whether the extra retrieval cost is worth it end-to-end.
 
 ---
 
-## 4. Document Summary Index
+## 5. Query intent extraction (NEW — observed in production)
+
+**Targets weakness (5).** Highest-impact change for the
+hook-driven path; everything else assumes a clean query going in.
+
+### Problem
+`scripts/hook-templates/auto-rag-retrieve.sh` currently feeds the entire
+`UserPromptSubmit` text to `agent-kms retrieve --json`. A user prompt
+like:
+
+> 問題を整理してください。別リポジトリで一般的な状況を用意して実験してみます。
+
+contains 2-3 distinct intents (整理 / 別リポジトリ / 実験) plus
+conversational glue (「〜してください」「〜してみます」). The single
+embedding produced from this lands somewhere in the middle of all three,
+matching weakly with too many chunks. Observed in `agent-kms-retrieve.jsonl`
+on 2026-05-15: prompts returning 48–120 hits each on a 196-chunk
+collection — i.e. up to 60% of the corpus passes the threshold filter.
+
+Downstream effect: ~10× context bloat for Claude, attention dilution
+across topically-related but unhelpful chunks, and a meaningless
+"effectiveness" measurement (USED rate is artificially low because the
+denominator is inflated).
+
+### Mechanisms (any of these, ranked by cost)
+
+**5a. Rule-based extraction (no LLM)**
+- Strip honorifics / conversational endings (`してください`, `してみます`,
+  `〜と思います`, `〜でしょうか`)
+- Drop sentence-final punctuation + question mark families
+- Truncate to first sentence when the prompt has multiple
+- Optionally split on `。` and run one retrieve per sentence, merge via RRF
+- Implementation: a 30-line `query_clean.py`; no new dependency
+
+Cost: zero LLM call, ~1ms per query. Won't fix everything — won't pull
+identifiers out of long sentences — but cheap floor.
+
+**5b. Keyword extraction**
+- Run a Japanese tokenizer (Sudachi or fugashi+UniDic) over the prompt
+- Keep nouns + technical identifiers (anything matching `[A-Za-z_][A-Za-z0-9_.-]+`)
+- Embed only the keyword bag
+
+Cost: tokenizer dependency (~10MB for SudachiDict-small). Robust for
+mixed JA/EN code-heavy prompts. Won't capture intent across keywords.
+
+**5c. LLM intent extraction**
+- 1 LLM call with a short prompt: "Extract the 1-3 search queries that
+  best capture what the user wants to find in their knowledge base.
+  Output a JSON array of strings."
+- Run retrieve on each, fuse via RRF (compose with §1 / §3 mechanisms)
+
+Cost: +1 LLM call per `UserPromptSubmit` firing. On Qwen3:8b local that's
+2-5s; on Gemini Flash <1s. Changes the hook from "no LLM in the hot path"
+to "1 LLM call always" — that's a deliberate design shift.
+
+This is essentially **HyDE applied at the intent layer instead of the
+document layer**: rewrite the query into something more retrievable
+without changing the corpus.
+
+**5d. Hybrid: 5a + safety cap + observability**
+- 5a always (rule-based clean) — cheap, no surprises
+- Hard cap `max_hits=20` in `retrieve.retrieve` as a safety valve
+- Log both the original and the cleaned query in
+  `agent-kms-retrieve.jsonl` so future analysis can replay
+- Defer 5b / 5c until evidence shows they're worth the cost
+
+### State in agent-kms
+Not implemented. Implementation site:
+
+- `agent_kms/query_clean.py` (new) — rule-based extraction (5a)
+- `scripts/hook-templates/auto-rag-retrieve.sh` — apply cleaning before
+  the `agent-kms retrieve` subprocess call, log both versions
+- `agent_kms/retrieve.py` — add `max_hits: int | None = None` arg as
+  the safety-cap (5d). Default `None` preserves current behaviour.
+
+### Validation plan
+Tactical (no notebook needed first): re-run the recorded queries in
+`agent-kms-retrieve.jsonl` with the new cleaning pass, compare:
+- avg hits/query (target: 5-15)
+- per-query USED rate via `agent-kms effectiveness`
+- hand-grade a few queries: did the cleaned version surface chunks the
+  raw version missed, or vice versa?
+
+If 5a alone moves avg hits below ~15 and USED rate up, that's a
+sufficient v1. Anything below is a tell-tale sign that more aggressive
+extraction (5b / 5c) is required.
+
+### Priority note
+This is the highest-leverage change for the hook-driven user-facing
+path right now, because every retrieve issued through the auto-hook
+suffers from it. **Likely deserves priority over §1 (hybrid)** despite
+being added later — the cleaner the query going in, the more legitimate
+all the downstream improvements get.
+
+---
+
+## 6. Document Summary Index
 
 Optional companion to Contextual Retrieval, often used together.
 
@@ -272,19 +376,26 @@ Not as high-priority as §1-3 for agent-kms's typical chunk volumes
 
 ## Implementation order (proposed)
 
-1. **Hybrid retrieval (BM25 + Dense)** — `sparse.py` already exists.
+Revised 2026-05-15 after observing the §5 weakness in production:
+
+1. **Query intent extraction + max_hits safety cap (§5d)** — highest
+   leverage because every other improvement on this list assumes a
+   clean query going in. 5a (rule-based cleaning) + a 20-hit cap is
+   minimal-risk; if avg hits/query stays high, escalate to 5b (keyword
+   extraction) or 5c (LLM intent extraction).
+2. **Hybrid retrieval (BM25 + Dense, §1)** — `sparse.py` already exists.
    Wire it in, re-ingest with `--reset`, validate in
-   `rag-evaluation-jp/07_hybrid_retrieval.ipynb`. Lowest unknown, highest
-   immediate win on identifier queries.
-2. **Contextual Retrieval** — biggest single-change impact on abstract
+   `rag-evaluation-jp/07_hybrid_retrieval.ipynb`. Lowest unknown after
+   §5, highest immediate win on identifier queries.
+3. **Contextual Retrieval (§2)** — biggest single-change impact on abstract
    corpora per Anthropic's benchmark. Needs an LLM-during-ingest path
    that the project doesn't currently have. Plan against cloud-LLM
    cost via prompt caching, or accept a slow one-time ingest for local.
-3. **Query expansion (HyDE / Multi-Query / Step-Back)** — only after
+4. **Query expansion (HyDE / Multi-Query / Step-Back, §3)** — only after
    §1 and §2 are in place, since they amplify whatever retriever is
    underneath. Try Step-Back first (single extra LLM call, easy A/B),
    then Multi-Query / HyDE based on which queries still miss.
-4. **Document Summary Index** — defer until a single source exceeds
+5. **Document Summary Index (§6)** — defer until a single source exceeds
    ~500 chunks; currently no source does.
 
 ---
@@ -319,6 +430,16 @@ differences between methods sit inside noise.
 | 3a | HyDE | ❌ | ❌ | ❌ |
 | 3b | Multi-Query | ❌ | ❌ | ❌ |
 | 3c | Step-Back | ❌ | ❌ | ❌ |
-| 4 | Document Summary | ❌ | ❌ | ❌ |
+| 5 | Query intent extraction | ❌ ← **next** | ❌ | ❌ |
+| 6 | Document Summary | ❌ | ❌ | ❌ |
 
 Last revisited: 2026-05-15.
+
+### Recent observations
+
+- **2026-05-15**: §5 (query intent extraction) added after observing 6
+  hook-driven retrieves in `agent-kms-retrieve.jsonl` returning
+  48–120 hits each on a 196-chunk collection. Raw `UserPromptSubmit`
+  text being embedded verbatim (including conversational glue like
+  "〜してください" "〜してみます") is the dominant cause. Promoted §5
+  above §1 in the implementation order.
