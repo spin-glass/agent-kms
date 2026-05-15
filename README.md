@@ -231,6 +231,36 @@ min_chars = 50
 If the source is missing, ``agent-kms capture`` writes the file but
 prints a ready-to-paste snippet on stderr instead of silently failing.
 
+### Capturing whole PRs in one shot
+
+When the review thread is on GitHub (not in a Claude Code transcript),
+``agent-kms capture-pr <ref>`` pulls every review body + per-file inline
+comment via the ``gh`` CLI and lets you pick which ones to keep:
+
+```bash
+agent-kms capture-pr 1234                # bare number, run inside the repo
+agent-kms capture-pr https://github.com/org/repo/pull/1234
+agent-kms capture-pr org/repo#1234
+
+# Common flags
+agent-kms capture-pr 1234 --all                    # skip the picker
+agent-kms capture-pr 1234 --only-changes-requested # noise-filtered first pass
+agent-kms capture-pr 1234 --inline-only            # per-file comments only
+agent-kms capture-pr 1234 --dry-run                # preview without writing
+```
+
+Severity defaults track the comment kind:
+``CHANGES_REQUESTED`` reviews → ``critical``,
+inline comments and ``COMMENTED`` reviews → ``high``,
+``APPROVED`` reviews → ``default``.
+
+For inline comments the captured file embeds the path, line number, and
+a 12-line diff-hunk excerpt so the retrieve hit later has enough
+context to identify what was being changed.
+
+Requires ``gh`` to be installed and authenticated (``brew install gh &&
+gh auth login``).
+
 ---
 
 ## Local LLM (Ollama) for privacy-sensitive setups

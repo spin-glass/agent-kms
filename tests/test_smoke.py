@@ -68,6 +68,104 @@ def test_session_extract_fallback_prompt_available():
     assert "{transcript_tail}" in _FALLBACK_LESSON_PROMPT
 
 
+def test_capture_pr_parse_ref():
+    """All four PR-ref forms parse to the same {owner,repo,number} shape."""
+    from agent_kms.capture_pr import parse_pr_ref
+
+    # Canonical URL
+    p = parse_pr_ref("https://github.com/japan-ai-inc/japan-ai/pull/1234")
+    assert p["owner"] == "japan-ai-inc"
+    assert p["repo"] == "japan-ai"
+    assert p["number"] == 1234
+
+    # owner/repo#N short form
+    p = parse_pr_ref("japan-ai-inc/japan-ai#42")
+    assert p["owner"] == "japan-ai-inc"
+    assert p["repo"] == "japan-ai"
+    assert p["number"] == 42
+
+    # bare #N — number resolved later by `gh` from the cwd's repo
+    p = parse_pr_ref("#7")
+    assert p["number"] == 7
+    assert "owner" not in p
+
+    # bare digits — same idea
+    p = parse_pr_ref("99")
+    assert p["number"] == 99
+    assert "owner" not in p
+
+    # Malformed → ValueError
+    import pytest as _p
+
+    with _p.raises(ValueError):
+        parse_pr_ref("not-a-ref")
+
+
+def test_capture_pr_normalise_items():
+    """A synthetic gh-shaped payload normalises into the expected list shape
+    with stable codes (r1/c1/i1...) so user selection works deterministically.
+    """
+    from agent_kms.capture_pr import normalise_items
+
+    pr = {
+        "number": 1,
+        "title": "test",
+        "url": "https://github.com/o/r/pull/1",
+        "reviews": [
+            {"state": "CHANGES_REQUESTED", "body": "fix DB transaction",
+             "author": {"login": "alice"}, "url": "https://github.com/o/r/pull/1#r-1"},
+            {"state": "COMMENTED", "body": "", "author": {"login": "bob"}},  # empty → dropped
+        ],
+        "comments": [
+            {"body": "general nit", "author": {"login": "carol"},
+             "url": "https://github.com/o/r/pull/1#c-1"},
+        ],
+    }
+    inline = [
+        {"body": "use core-prisma", "path": "src/db.ts", "line": 12,
+         "diff_hunk": "@@\n-import ...\n+import ...",
+         "user": {"login": "alice"},
+         "html_url": "https://github.com/o/r/pull/1#discussion-1"},
+    ]
+
+    items = normalise_items(pr, inline)
+    codes = [x["code"] for x in items]
+    assert codes == ["r1", "c1", "i1"]  # empty review dropped, others present
+    assert items[0]["state"] == "CHANGES_REQUESTED"
+    assert items[2]["path"] == "src/db.ts"
+    assert items[2]["line"] == 12
+
+
+def test_capture_pr_build_capture_args_severity_mapping():
+    """Severity must follow the CHANGES_REQUESTED→critical, others→high rule
+    so the retrieve boost can lift the most-painful feedback to the top.
+    """
+    from agent_kms.capture_pr import build_capture_args
+
+    pr = {"number": 7, "url": "https://github.com/o/r/pull/7"}
+    review_cr = {"code": "r1", "kind": "review", "state": "CHANGES_REQUESTED",
+                 "body": "transactionで囲んで。", "author": "alice", "url": "u",
+                 "path": None, "line": None, "diff_hunk": None}
+    review_comment = {**review_cr, "state": "COMMENTED"}
+    inline = {"code": "i1", "kind": "inline", "state": "INLINE",
+              "body": "core-prisma を使う。", "author": "bob",
+              "path": "src/db.ts", "line": 12, "diff_hunk": "@@\n-x\n+y",
+              "url": "u"}
+
+    _, _, sev_cr, tags_cr = build_capture_args(review_cr, pr, [])
+    assert sev_cr == "critical"
+    assert "pr-review" in tags_cr
+
+    _, _, sev_co, _ = build_capture_args(review_comment, pr, [])
+    assert sev_co == "high"
+
+    title_in, body_in, sev_in, tags_in = build_capture_args(inline, pr, [])
+    assert sev_in == "high"
+    assert "inline" in tags_in
+    assert "src/db.ts" in title_in
+    assert "src/db.ts:12" in body_in  # file:line context inlined
+
+
 def test_capture_slugify():
     """Slugs must be filesystem-safe + date-prefixed + collision-resistant."""
     from agent_kms.capture import slugify

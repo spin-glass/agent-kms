@@ -128,6 +128,25 @@ def _cmd_effectiveness(args: argparse.Namespace) -> int:
     return effectiveness_main()
 
 
+def _cmd_capture_pr(args: argparse.Namespace) -> int:
+    from .capture_pr import main as capture_pr_main
+
+    sys.argv = ["capture-pr", args.ref]
+    if args.all:
+        sys.argv += ["--all"]
+    if args.only_changes_requested:
+        sys.argv += ["--only-changes-requested"]
+    if args.inline_only:
+        sys.argv += ["--inline-only"]
+    if args.dry_run:
+        sys.argv += ["--dry-run"]
+    if args.tags:
+        sys.argv += ["--tags", args.tags]
+    if args.target_dir:
+        sys.argv += ["--target-dir", args.target_dir]
+    return capture_pr_main()
+
+
 def _cmd_capture(args: argparse.Namespace) -> int:
     from .capture import main as capture_main
 
@@ -326,6 +345,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override session_id (defaults to transcript filename stem).",
     )
     pe2.set_defaults(func=_cmd_effectiveness)
+
+    pcpr = sub.add_parser(
+        "capture-pr",
+        help=(
+            "Capture review comments from a GitHub PR into the knowledge base "
+            "(requires the `gh` CLI authenticated)."
+        ),
+    )
+    pcpr.add_argument("ref", help="PR ref: URL, owner/repo#N, #N, or bare number")
+    pcpr.add_argument("--all", action="store_true",
+                      help="Capture every comment without interactive selection.")
+    pcpr.add_argument("--only-changes-requested", action="store_true")
+    pcpr.add_argument("--inline-only", action="store_true")
+    pcpr.add_argument("--dry-run", action="store_true")
+    pcpr.add_argument("--tags", default="")
+    pcpr.add_argument("--target-dir", default=None)
+    pcpr.set_defaults(func=_cmd_capture_pr)
 
     pc = sub.add_parser(
         "capture",
