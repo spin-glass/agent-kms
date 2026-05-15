@@ -79,6 +79,56 @@ def test_session_extract_fallback_prompt_available():
     assert "{transcript_tail}" in _FALLBACK_LESSON_PROMPT
 
 
+def test_effectiveness_hit_used_heuristic():
+    """The substring heuristic must:
+      - match when the assistant quotes the heading (any case / whitespace)
+      - match on the filename stem as a fallback
+      - skip too-short heading + stem (heuristic ignores them)
+      - miss when the assistant uses neither
+    """
+    from agent_kms.effectiveness import hit_used
+
+    asst = [
+        "Looking at pr-review.md, the PR Review framework is what we want.",
+        "Earlier I checked the layer-1 intent step.",
+    ]
+
+    # Match on heading (whitespace + case insensitive)
+    assert hit_used(
+        {"source": "/a/b/pr-review.md", "heading": "PR REVIEW"}, asst
+    )[0] is True
+
+    # Match on filename stem when heading is too short / generic
+    assert hit_used(
+        {"source": "/a/b/pr-review.md", "heading": "x"}, asst
+    )[0] is True
+
+    # Miss — neither heading nor stem are referenced anywhere
+    assert hit_used(
+        {"source": "/a/b/unrelated.md", "heading": "Something Different"},
+        asst,
+    ) == (False, "")
+
+    # Too-short heading AND too-short stem → no candidates, miss
+    assert hit_used(
+        {"source": "/a/b/x.md", "heading": "lo"}, asst
+    ) == (False, "")
+
+
+def test_effectiveness_report_with_no_log(tmp_path, capsys):
+    """When no retrieve log exists, report prints a friendly note and exits."""
+    from agent_kms.effectiveness import report
+
+    transcript = tmp_path / "session-abc.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    missing_log = tmp_path / "no-such.jsonl"
+
+    result = report("abc12345-fake-session-id", transcript, log_path=missing_log)
+    captured = capsys.readouterr()
+    assert "no retrieve events" in captured.err
+    assert result == {"events": 0, "hits": 0, "used": 0}
+
+
 def test_coerce_to_list_of_dicts():
     """Lenient JSON-shape adapter: small LLMs often wrap or unwrap the
     requested array. The adapter recovers common shapes so legitimate

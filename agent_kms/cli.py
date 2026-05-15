@@ -68,6 +68,11 @@ def _cmd_retrieve(args: argparse.Namespace) -> int:
     from .retrieve import retrieve
 
     results = retrieve(args.query, score_threshold=args.threshold)
+    if args.json:
+        import json as _json
+
+        print(_json.dumps(results, ensure_ascii=False))
+        return 0
     if not results:
         print("(no chunks above threshold)")
         return 0
@@ -110,8 +115,17 @@ def _cmd_postmortem(args: argparse.Namespace) -> int:
 def _cmd_improve(args: argparse.Namespace) -> int:
     from .auto_improve import main as improve_main
 
-    sys.argv = ["improve", "--transcript", args.transcript]
+    sid = args.session_id or Path(args.transcript).stem
+    sys.argv = ["improve", "--transcript", args.transcript, "--session-id", sid]
     return improve_main()
+
+
+def _cmd_effectiveness(args: argparse.Namespace) -> int:
+    from .effectiveness import main as effectiveness_main
+
+    sid = args.session_id or Path(args.transcript).stem
+    sys.argv = ["effectiveness", "--transcript", args.transcript, "--session-id", sid]
+    return effectiveness_main()
 
 
 def _cmd_install_hooks(args: argparse.Namespace) -> int:
@@ -248,6 +262,11 @@ def build_parser() -> argparse.ArgumentParser:
     pr = sub.add_parser("retrieve", help="One-off retrieve")
     pr.add_argument("query")
     pr.add_argument("--threshold", type=float, default=0.93)
+    pr.add_argument(
+        "--json",
+        action="store_true",
+        help="Output the raw retrieve result list as JSON (machine-readable).",
+    )
     pr.set_defaults(func=_cmd_retrieve)
 
     ps = sub.add_parser("serve", help="Start FastMCP server")
@@ -264,7 +283,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     pa = sub.add_parser("improve", help="Auto-improve gap detection")
     pa.add_argument("--transcript", required=True)
+    pa.add_argument(
+        "--session-id",
+        default=None,
+        help="Override session_id (defaults to transcript filename stem).",
+    )
     pa.set_defaults(func=_cmd_improve)
+
+    pe2 = sub.add_parser(
+        "effectiveness",
+        help="Summarise which retrieved chunks the assistant referenced this session",
+    )
+    pe2.add_argument("--transcript", required=True)
+    pe2.add_argument(
+        "--session-id",
+        default=None,
+        help="Override session_id (defaults to transcript filename stem).",
+    )
+    pe2.set_defaults(func=_cmd_effectiveness)
 
     ph = sub.add_parser("install-hooks", help="Copy Claude Code hook templates")
     ph.add_argument("--target", default=".", help="Target project directory")

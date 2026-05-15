@@ -26,27 +26,29 @@ LOG_FILE="$LOG_DIR/agent-kms-stop.log"
 INPUT=$(cat)
 [ -z "$INPUT" ] && exit 0
 
-TRANSCRIPT=$(printf '%s' "$INPUT" | python3 -c "
+PARSED=$(printf '%s' "$INPUT" | python3 -c "
 import json, sys
 try:
     d = json.load(sys.stdin)
-    print(d.get('transcript_path', ''), end='')
+    print(d.get('transcript_path', ''))
+    print(d.get('stop_hook_active', ''))
+    print(d.get('session_id', ''))
 except Exception:
     pass
 " 2>/dev/null)
-
-STOP_ACTIVE=$(printf '%s' "$INPUT" | python3 -c "
-import json, sys
-try:
-    d = json.load(sys.stdin)
-    print(d.get('stop_hook_active', ''), end='')
-except Exception:
-    pass
-" 2>/dev/null)
+TRANSCRIPT=$(printf '%s\n' "$PARSED" | sed -n '1p')
+STOP_ACTIVE=$(printf '%s\n' "$PARSED" | sed -n '2p')
+SESSION_ID=$(printf '%s\n' "$PARSED" | sed -n '3p')
 
 [ -z "$TRANSCRIPT" ] && exit 0
 [ ! -f "$TRANSCRIPT" ] && exit 0
 [ "$STOP_ACTIVE" = "True" ] && exit 0
+# Fallback for older Claude Code versions that did not pass session_id:
+# derive it from the transcript filename stem (Claude Code uses the UUID
+# as the JSONL basename), so effectiveness lookup still works.
+if [ -z "$SESSION_ID" ]; then
+  SESSION_ID=$(basename "$TRANSCRIPT" .jsonl)
+fi
 
 QDRANT_URL="${QDRANT_URL:-http://localhost:6333}"
 curl -sSf -m 1 "${QDRANT_URL%/}/collections" >/dev/null 2>&1 || exit 0
@@ -61,13 +63,21 @@ if [ "$RAG_PROVIDER" != "ollama" ] \
   exit 0
 fi
 
-# Detach so the 5s Stop-hook timeout doesn't kill the long-running work
-if command -v setsid >/dev/null 2>&1; then
-  setsid nohup agent-kms extract-lessons --transcript "$TRANSCRIPT" \
-    >>"$LOG_FILE" 2>&1 < /dev/null &
-else
-  nohup agent-kms extract-lessons --transcript "$TRANSCRIPT" \
-    >>"$LOG_FILE" 2>&1 < /dev/null &
-fi
+# Detach so the 5s Stop-hook timeout doesn't kill the long-running work.
+# All three passes run sequentially inside one detached shell so they share
+# the LLM + embedding model load cost:
+#   1. extract-lessons   — mine new lessons from the transcript tail
+#   2. effectiveness     — summarise USED / UNUSED retrieved chunks
+#   3. improve           — detect retrieval gaps & widen instinct keywords
+SPAWN_PREFIX=""
+command -v setsid >/dev/null 2>&1 && SPAWN_PREFIX="setsid"
+TRANSCRIPT="$TRANSCRIPT" SESSION_ID="$SESSION_ID" \
+  $SPAWN_PREFIX nohup bash -c '
+    agent-kms extract-lessons --transcript "$TRANSCRIPT"
+    echo "---"
+    agent-kms effectiveness --transcript "$TRANSCRIPT" --session-id "$SESSION_ID"
+    echo "---"
+    agent-kms improve --transcript "$TRANSCRIPT" --session-id "$SESSION_ID"
+  ' >>"$LOG_FILE" 2>&1 < /dev/null &
 disown 2>/dev/null
 exit 0
