@@ -192,6 +192,46 @@ prompts by placing them under `.agent-kms/prompts/` and pointing
 
 ---
 
+## Capturing PR-review lessons
+
+Stop-hook lesson extraction only sees Claude Code transcripts. Critical
+feedback delivered as a GitHub PR comment — and resolved without a chat
+session — would otherwise never enter the knowledge base. Use
+``agent-kms capture`` for these manually:
+
+```bash
+agent-kms capture \
+    --title "Prisma client must import from @japan-ai/japan-ai-core-prisma/client" \
+    --severity critical \
+    --tags "prisma,import,architecture" \
+    --source-pr "https://github.com/org/repo/pull/1234" \
+    --editor   # opens $EDITOR for the body; or pipe via stdin
+```
+
+This writes ``<knowledge_root>/docs/pr-lessons/<date>-<slug>.md`` with
+YAML frontmatter and re-ingests automatically. The default severity is
+``critical`` so retrieve's severity boost (``+0.05``) lifts these
+lessons above default-severity session lessons — repeated mistakes
+should never need a third reminder.
+
+Add this source to your project's ``.agent-kms/kms.toml`` once so
+captured files are picked up:
+
+```toml
+[[ingest.sources]]
+name = "pr_lessons"
+kind = "markdown_h2"
+roots = ["docs/pr-lessons"]
+default_severity = "critical"
+default_applicability = "universal"
+min_chars = 50
+```
+
+If the source is missing, ``agent-kms capture`` writes the file but
+prints a ready-to-paste snippet on stderr instead of silently failing.
+
+---
+
 ## Local LLM (Ollama) for privacy-sensitive setups
 
 When transcripts contain customer data or other information that must not

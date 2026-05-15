@@ -128,6 +128,31 @@ def _cmd_effectiveness(args: argparse.Namespace) -> int:
     return effectiveness_main()
 
 
+def _cmd_capture(args: argparse.Namespace) -> int:
+    from .capture import main as capture_main
+
+    sys.argv = ["capture", "--title", args.title]
+    if args.severity:
+        sys.argv += ["--severity", args.severity]
+    if args.applicability:
+        sys.argv += ["--applicability", args.applicability]
+    if args.tags:
+        sys.argv += ["--tags", args.tags]
+    if args.source_pr:
+        sys.argv += ["--source-pr", args.source_pr]
+    if args.body:
+        sys.argv += ["--body", args.body]
+    if args.editor:
+        sys.argv += ["--editor"]
+    if args.target_dir:
+        sys.argv += ["--target-dir", args.target_dir]
+    if args.no_ingest:
+        sys.argv += ["--no-ingest"]
+    if args.force:
+        sys.argv += ["--force"]
+    return capture_main()
+
+
 def _cmd_install_hooks(args: argparse.Namespace) -> int:
     target = Path(args.target).expanduser().resolve()
     hooks_dir = target / ".claude" / "hooks"
@@ -301,6 +326,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override session_id (defaults to transcript filename stem).",
     )
     pe2.set_defaults(func=_cmd_effectiveness)
+
+    pc = sub.add_parser(
+        "capture",
+        help="Capture a PR-review lesson into the knowledge base as a Markdown file.",
+    )
+    pc.add_argument("--title", required=True)
+    pc.add_argument("--severity", default=None, choices=["critical", "high", "default"])
+    pc.add_argument(
+        "--applicability",
+        default=None,
+        choices=["universal", "conditional", "topic-specific"],
+    )
+    pc.add_argument("--tags", default="")
+    pc.add_argument("--source-pr", default="")
+    pc.add_argument("--body", default="")
+    pc.add_argument("--editor", action="store_true")
+    pc.add_argument("--target-dir", default=None)
+    pc.add_argument("--no-ingest", action="store_true")
+    pc.add_argument("--force", action="store_true")
+    pc.set_defaults(func=_cmd_capture)
 
     ph = sub.add_parser("install-hooks", help="Copy Claude Code hook templates")
     ph.add_argument("--target", default=".", help="Target project directory")

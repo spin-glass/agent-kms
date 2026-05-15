@@ -79,6 +79,62 @@ def test_session_extract_fallback_prompt_available():
     assert "{transcript_tail}" in _FALLBACK_LESSON_PROMPT
 
 
+def test_capture_slugify():
+    """Slugs must be filesystem-safe + date-prefixed + collision-resistant."""
+    from agent_kms.capture import slugify
+
+    # ASCII title → readable slug
+    s = slugify("Prisma client import path is wrong")
+    assert s.startswith(f"{__import__('datetime').date.today().isoformat()}-")
+    assert "prisma-client-import-path-is-wrong" in s
+
+    # Mixed-script title: ASCII tokens are preserved (readable), non-ASCII
+    # tokens drop out — but enough ASCII remains so no hash fallback.
+    s_mixed = slugify("Prisma クライアントの import 経路")
+    assert s_mixed.startswith(f"{__import__('datetime').date.today().isoformat()}-")
+    assert "prisma" in s_mixed and "import" in s_mixed
+
+    # All-Japanese title → ASCII part empty, must fall back to hash slug.
+    s_jp = slugify("クライアントの設定方法を確認したい")
+    assert s_jp.startswith(f"{__import__('datetime').date.today().isoformat()}-")
+    assert "lesson-" in s_jp
+
+    # Two different titles produce different slugs
+    assert slugify("Foo bar baz qux") != slugify("Quux corge grault")
+
+
+def test_capture_render_includes_frontmatter():
+    """The rendered file must contain machine-readable frontmatter + H1 + body."""
+    from agent_kms.capture import render
+
+    out = render(
+        title="PR feedback X",
+        body="Some markdown body.",
+        severity="critical",
+        applicability="universal",
+        tags=["foo", "bar"],
+        source_pr="https://github.com/o/r/pull/123",
+    )
+    assert "---" in out
+    assert "severity: critical" in out
+    assert "applicability: universal" in out
+    assert "tags: [foo, bar]" in out
+    assert "source_pr: https://github.com/o/r/pull/123" in out
+    assert "# PR feedback X" in out
+    assert "Some markdown body." in out
+
+
+def test_capture_write_does_not_overwrite_silently(tmp_path):
+    """Two captures with the same slug on the same day must not overwrite."""
+    from agent_kms.capture import write_file
+
+    p1 = write_file(tmp_path, "2026-05-15-x", "content A", force=False)
+    p2 = write_file(tmp_path, "2026-05-15-x", "content B", force=False)
+    assert p1 != p2  # second one got a hash suffix
+    assert p1.read_text() == "content A"
+    assert p2.read_text() == "content B"
+
+
 def test_effectiveness_hit_used_heuristic():
     """The substring heuristic must:
       - match when the assistant quotes the heading (any case / whitespace)
