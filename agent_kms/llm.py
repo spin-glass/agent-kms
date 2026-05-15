@@ -200,9 +200,13 @@ class _OllamaProvider:
             headers={"Content-Type": "application/json"},
         )
         try:
-            # Initial model load can take 10-30s; total generation up to ~3 min
-            # for a 14B-class model on Mac. 180s covers most cases.
-            with self._urlreq.urlopen(req, timeout=180) as resp:
+            # 300s covers cold start + generation for current-generation
+            # models up to ~14B on Apple Silicon. Cold-start alone can be
+            # 30-60s when a model is first loaded into RAM after pull or
+            # after Ollama's idle-unload kicks in; thinking-mode models
+            # (qwen3 series) add internal reasoning tokens before any
+            # visible output, easily doubling wall time.
+            with self._urlreq.urlopen(req, timeout=300) as resp:
                 body = self._json.loads(resp.read().decode("utf-8"))
         except self._urlerr.HTTPError as e:
             detail = e.read().decode("utf-8", errors="replace")[:500]
