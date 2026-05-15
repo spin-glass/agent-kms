@@ -89,32 +89,41 @@ JSON only:"""
 
 CONFIDENCE_FLOOR = 0.85
 
-# Second-pass prompt: extract domain-specific anti-patterns. Results are
-# upserted with source_type=anti_pattern + severity=critical so retrieve
-# boosts them. The text below is the fallback when no preset prompt exists.
-_FALLBACK_ANTI_PATTERN_PROMPT = """以下の session transcript の末尾から、
-**Cocos2d-x → Unity 移植で観測された「cocos と一致しない実装」の anti-pattern** を
-最大 3 件 JSON 配列で抽出してください。
+# Second-pass prompt: extract domain-specific anti-patterns from the
+# session. Results are upserted with source_type=anti_pattern +
+# severity=critical so retrieve boosts them above default lessons. The
+# text below is the language-neutral fallback used when no preset prompt
+# is configured — projects with a stable "convention vs. wrong impl vs.
+# correct impl" vocabulary should override this via the preset.
+_FALLBACK_ANTI_PATTERN_PROMPT = """From the tail of the following session transcript,
+extract up to **3 anti-patterns** that were observed — implementations that
+violated the project's stated conventions or specifications. Output a JSON
+array only.
 
-形式: [{{"text": "anti-pattern 本文 (3-5 文、Cocos 規約 + Unity 誤実装 + 正解の 3 要素を含む)",
-        "title": "短いタイトル (10-30 字)",
+Format: [{{"text": "anti-pattern body (3-5 sentences covering: the
+convention, the wrong implementation, and the correct one)",
+        "title": "short title (10-30 chars)",
         "confidence": 0.0-1.0}}]
 
-採用基準 (全て満たすもののみ):
-1. **observed**: session 内で actual に観測された mismatch (推測 / 仮定は NG)
-2. **specific**: 具体的 function 名 / API 名 / 数値 / cpp 行番号などを含む
-3. **transferable**: 別 UI port にも適用できる構造的 pattern (一回性ミスは NG)
+Selection criteria (ALL must hold):
+1. **Observed** — surfaced in THIS session (not hypothetical / proposed).
+2. **Specific** — names concrete functions / APIs / numbers / file lines.
+3. **Transferable** — describes a structural pattern that would apply to a
+   different target in the same project.
 
-却下対象:
-- ❌ 一般原則 (「アセット確認しろ」「テストしろ」) — これは別 extract が拾う
-- ❌ 単発 typo / 鍵打ち間違え / git op ミス
-- ❌ 完了予定の TODO / proposed 状態
-- ❌ 既存 anti-pattern catalog にある (重複): inner-loop-omission, function-omission,
-  empty-panel, header-only-table, text-zorder-overlap, layout-collision, low-contrast,
-  font-slot-mismatch, sprite-count-drift, sprite-vs-solid-color, label-anchor-shift,
-  setlabel-align-translation, runtime-hack, value-tampering
+Reject:
+- ❌ General principles ("verify assets", "write tests") — those go in
+  the lesson extractor.
+- ❌ One-off typos / single key-mistypes / git ops.
+- ❌ Proposed-state TODOs.
 
-confidence 0.85 未満は出力しない。新規 anti-pattern が無ければ空配列 [] を返す。
+**Output language**: Match the transcript's primary natural language. If
+the transcript is mostly Japanese, write each ``text`` and ``title`` in
+natural, idiomatic Japanese. Code identifiers, file paths, and English
+technical terms stay in their original form.
+
+Confidence < 0.85 must not be output. Return ``[]`` if no new anti-pattern
+qualifies.
 
 transcript:
 {transcript_tail}
@@ -318,10 +327,11 @@ def _find_duplicate(client, vector: list[float]) -> tuple[bool, str]:
 
 
 def extract_anti_patterns(transcript_tail: str, max_chars: int = 60000) -> list[dict]:
-    """Second-pass extraction: cocos-mismatch anti-patterns specifically.
+    """Second-pass extraction: convention-violation anti-patterns observed
+    in the session.
 
-    Returns list of {text, title, confidence} entries. Empty on no observation
-    or LLM failure.
+    Returns list of ``{text, title, confidence}`` entries. Empty on no
+    observation or LLM failure.
     """
     if not transcript_tail.strip():
         return []
@@ -538,8 +548,10 @@ def main() -> int:
     print(f"upserted {n} session_lesson point(s) (session_id={session_id})", file=sys.stderr)
     _streak_record(success=(n > 0))
 
-    # Second pass: extract Cocos→Unity mismatch anti-patterns specifically.
-    # Tagged source_type='anti_pattern' / severity='critical' for retrieve boost.
+    # Second pass: extract convention-violation anti-patterns from the
+    # session (the "wrong implementation observed vs. correct pattern"
+    # variant). Tagged source_type='anti_pattern' / severity='critical'
+    # so the retrieve severity boost keeps them above default lessons.
     anti = extract_anti_patterns(tail)
     print(f"extracted: {len(anti)} anti_pattern(s)", file=sys.stderr)
     n_anti = upsert_anti_patterns(anti, session_id)

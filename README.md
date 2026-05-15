@@ -164,12 +164,13 @@ over the MCP stdio transport. Register in `~/.claude.json`:
 
 | Preset        | When to use                                                |
 |---------------|------------------------------------------------------------|
-| `general`     | Default. Reads `docs/{knowledge,known-issues,decisions,adr}` + `data/instincts`. English prompts. |
-| `cocos_unity` | Reference preset extracted from the source migration project (Japanese prompts, file_severity map, gap rules). Copy + edit to model your own preset on. |
+| `general`     | Default. Reads `docs/{knowledge,known-issues,decisions,adr}` + `data/instincts`. English prompts. The prompts include an explicit "match the transcript's primary language" directive so output stays in the user's working language even though the instructions are in English. |
 
-Select via `--preset` flag or `AGENT_KMS_PRESET` env var. Override
-prompts by placing them under `.agent-kms/prompts/` and pointing
-`[prompts] dir = "..."` in `kms.toml`.
+Select via `--preset` flag or `AGENT_KMS_PRESET` env var. To swap to
+Japanese (or another) prompts in your project without changing the
+library, place override files at `.agent-kms/prompts/*.md` and point
+`[prompts] dir = "prompts"` in `kms.toml` — agent-kms falls back to the
+general preset's English prompt only when an override is missing.
 
 ---
 

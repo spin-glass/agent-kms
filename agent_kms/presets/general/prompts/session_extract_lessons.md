@@ -25,7 +25,14 @@ Forbidden vocabulary: skeleton, placeholder, defer, minimal, scope-narrow,
 dummy. **Confidence < 0.85 must NOT be output.** Return ``[]`` if nothing
 qualifies.
 
+**Output language**: Match the transcript's primary natural language. If
+the transcript is mostly Japanese, write each ``text`` field in natural,
+idiomatic Japanese — proper particles, no translated-Chinese phrasing,
+no missing okurigana. Code identifiers, file paths, and English technical
+terms (API names, command flags, library names) stay in their original
+form. If the transcript is mostly English, write in English.
+
 transcript:
 {transcript_tail}
 
-JSON only:
+JSON only: /no_think

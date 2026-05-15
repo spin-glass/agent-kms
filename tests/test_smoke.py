@@ -28,17 +28,6 @@ def test_config_loads_general_preset():
     assert cfg.score_threshold == 0.93
 
 
-def test_config_loads_cocos_preset():
-    from agent_kms.config import load_config, reset_cache
-    reset_cache()
-    cfg = load_config("cocos_unity")
-    assert cfg.collection == "migration_knowledge"
-    assert cfg.file_severity_map.get("docs/cocos-unity-mapping.md") == (
-        "critical",
-        "universal",
-    )
-
-
 def test_load_prompt_general():
     from agent_kms.config import load_prompt, reset_cache
     reset_cache()

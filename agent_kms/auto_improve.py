@@ -75,10 +75,22 @@ LOG_FILE = LOG_DIR / "agent-kms-auto-improve.log"
 # concrete evidence of a missed retrieval; keep the table small.
 
 def load_gap_rules() -> list[dict]:
-    """Load gap rules from active preset's ``gap_rules.toml`` (if present).
+    """Load gap rules from the active project's ``kms.toml``.
 
-    Falls back to the built-in CalcioA rules when none configured. Each
-    returned dict has shape ``{"id": str, "regex": re.Pattern, "expected_source": str}``.
+    Each rule has shape::
+
+        {"id": str, "regex": re.Pattern, "expected_source": str}
+
+    Source TOML::
+
+        [[auto_improve.rules]]
+        id = "example-rule"
+        regex = "(symptom phrase 1|symptom phrase 2)"
+        expected_source = "data/instincts/example.yaml"
+
+    Returns ``[]`` when no rules are configured — auto-improve becomes a
+    no-op rather than firing built-in rules that belong to one specific
+    project's symptom vocabulary.
     """
     try:
         from .config import load_config
@@ -97,52 +109,9 @@ def load_gap_rules() -> list[dict]:
                 )
             except (KeyError, re.error):
                 continue
-        if out:
-            return out
+        return out
     except Exception:
-        pass
-    return _BUILTIN_GAP_RULES
-
-
-_BUILTIN_GAP_RULES = [
-    {
-        "id": "default-initialized-all-rows-same",
-        "regex": re.compile(
-            r"(全\s*\d*\s*行が?同じ|全\s*row\s*同じ|背後に透けて|背後に同じ文字|"
-            r"ghost\s*text|重複表示|重複文字|同名重複|全\s*\w+\s*=\s*0|"
-            r"chrno\s*=\s*0|全\s*player\s+\S+\s*太|配列の中身が?\s*default)",
-            re.IGNORECASE,
-        ),
-        "expected_source": "data/instincts/default-initialized-fields-not-populated.yaml",
-    },
-    {
-        "id": "real-data-claim-before-verify",
-        "regex": re.compile(
-            r"(real\s*data\s*に?繋|実\s*デ[ータ]タ.*?接続|本番同等のデータ|"
-            r"production-equivalent|savedata\s*から?読んで)",
-            re.IGNORECASE,
-        ),
-        "expected_source": "data/instincts/verify-game-state-in-cocos-source.yaml",
-    },
-    {
-        "id": "completion-gate-before-multi-axis",
-        "regex": re.compile(
-            r"(Completion\s*Gate\s*Report|完了報告|GATE\s*PASSED|"
-            r"完了宣言|完了して?ください)",
-            re.IGNORECASE,
-        ),
-        "expected_source": "data/instincts/cocos-ui-multi-axis-parity-before-complete.yaml",
-    },
-    {
-        "id": "symptom-loop-multiple-visual-patches",
-        "regex": re.compile(
-            r"(symptom\s*loop|症状ループ|連続\s*\d*\s*commit|"
-            r"\d+\s*commit\s*でも解消|繰り返し\s*patch|3rd\s*compensating)",
-            re.IGNORECASE,
-        ),
-        "expected_source": "data/instincts/cocos-ui-isolated-test-scene-on-symptom-loop.yaml",
-    },
-]
+        return []
 
 MAX_GAPS_PER_SESSION = 5
 RETRIEVE_TOP_N = 10

@@ -1,1 +1,0 @@
-Cocos2d-x の実装と乖離しない 1:1 移植原則 (faithful port)、実装着手前のアセット存在確認 (asset verification, Sprite/PNG/SS6)、UI 規約 checklist (label anchor 規約、sprite vs solid color、OBJPRIO)、Cocos→Unity 移植の phase workflow、実装完了前の screenshot 視覚検証

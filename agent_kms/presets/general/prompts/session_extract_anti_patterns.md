@@ -21,7 +21,15 @@ Reject:
 Confidence < 0.85 must not be output. Return ``[]`` if no new anti-pattern
 qualifies.
 
+**Output language**: Match the transcript's primary natural language. If
+the transcript is mostly Japanese, write each ``text`` and ``title``
+field in natural, idiomatic Japanese — proper particles, no translated-
+Chinese phrasing, no missing okurigana. Code identifiers, file paths,
+and English technical terms (API names, command flags, library names)
+stay in their original form. If the transcript is mostly English, write
+in English.
+
 transcript:
 {transcript_tail}
 
-JSON only:
+JSON only: /no_think

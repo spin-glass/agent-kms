@@ -37,14 +37,20 @@ THRESHOLD="${AGENT_KMS_RETRIEVE_THRESHOLD:-0.93}"
 # Single Python pass: parse hook input, keyword-gate, call agent-kms,
 # emit context block, append JSONL log. Keeping it in one subshell avoids
 # fragile bash escaping around prompts that contain quotes / newlines.
-printf '%s' "$INPUT" | THRESHOLD="$THRESHOLD" python3 - <<'PY'
+#
+# NOTE on plumbing: pass $INPUT via the HOOK_INPUT env var rather than
+# piping to stdin. `python3 - <<'PY'` already uses stdin for the script
+# body (heredoc) — any earlier `printf | python3` is silently overridden
+# by bash's redirection precedence, and json.load(sys.stdin) then reads
+# EOF and the hook becomes a permanent no-op.
+HOOK_INPUT="$INPUT" THRESHOLD="$THRESHOLD" python3 - <<'PY'
 import json, os, re, subprocess, sys, time
 
 THRESHOLD = os.environ.get("THRESHOLD", "0.93")
 LOG_PATH = os.path.expanduser("~/.claude/logs/agent-kms-retrieve.jsonl")
 
 try:
-    data = json.load(sys.stdin)
+    data = json.loads(os.environ.get("HOOK_INPUT", ""))
 except Exception:
     sys.exit(0)
 
