@@ -92,7 +92,9 @@ agent-kms doctor
 ### Storage
 
 A single Qdrant collection (default `agent_knowledge`) of 768-dim
-`multilingual-e5-base` vectors, with payload:
+`cl-nagoya/ruri-v3-310m` vectors (Japanese-tuned; the previous default
+`intfloat/multilingual-e5-base` is the same dimensionality and can be
+restored via `AGENT_KMS_MODEL`), with payload:
 
 ```text
 text, heading, source_file, source_type, severity, applicability, confidence, tags
@@ -107,8 +109,32 @@ without requiring an LLM rerank.
 
 Threshold-based (no top-N cap): every chunk whose
 `cosine + severity_boost + applicability_boost ≥ score_threshold` is
-returned. The default threshold (0.93) was empirically tuned for
-multilingual-e5-base on Japanese-heavy corpora; tune in `kms.toml`.
+returned. The default threshold (0.83) is tuned for `ruri-v3-310m` on
+Japanese technical-documentation corpora — calibrate per corpus with
+`agent-kms calibrate-threshold` and set the result in `kms.toml`.
+
+### Calibrating `score_threshold`
+
+Different corpus + model combinations have different cosine distributions,
+so the default threshold may surface too many or too few chunks on your
+data. To find the F1-optimal value, label 20–30 real queries with the
+chunks they should return and run a sweep:
+
+```bash
+agent-kms calibrate-threshold examples/calibrate_queries.example.yaml
+#       T       P       R      F1   avg_n   empty
+# ---------------------------------------------------
+#    0.78   0.142   0.870   0.244    12.3       0
+#    ...
+#    0.83   0.520   0.760   0.617     2.9       2 ◀ best F1
+#    ...
+#    0.94   0.000   0.000   0.000     0.0      27
+```
+
+Then set the winning `T` in `.agent-kms/kms.toml` under
+`[retrieve].score_threshold` (or via `AGENT_KMS_RETRIEVE_THRESHOLD` for
+the auto-retrieve hook). See `examples/calibrate_queries.example.yaml`
+for the labelled-set schema.
 
 ### Ingest
 
@@ -182,14 +208,14 @@ general preset's English prompt only when an override is missing.
 | `AGENT_KMS_PRESET`               | `general`                            | Preset name                        |
 | `AGENT_KMS_COLLECTION`           | `agent_knowledge`                    | Qdrant collection                  |
 | `AGENT_KMS_KNOWLEDGE_ROOT`       | `cwd`                                | Resolves source roots              |
-| `AGENT_KMS_MODEL`                | `intfloat/multilingual-e5-base`      | SentenceTransformer model          |
+| `AGENT_KMS_MODEL`                | `cl-nagoya/ruri-v3-310m`             | SentenceTransformer model (Japanese-tuned 768d; set `intfloat/multilingual-e5-base` for the previous default) |
 | `AGENT_KMS_VECTOR_SIZE`          | `768`                                | Must match the model               |
 | `GEMINI_API_KEY`                 | (unset)                              | Primary LLM provider               |
 | `ANTHROPIC_API_KEY`              | (unset)                              | Fallback LLM provider              |
 | `OLLAMA_URL`                     | `http://localhost:11434`             | Local Ollama daemon endpoint       |
 | `OLLAMA_MODEL`                   | `qwen2.5:7b`                         | Local model tag                    |
 | `RAG_PROVIDER`                   | `auto`                               | `auto` / `gemini` / `haiku` / `ollama` |
-| `AGENT_KMS_RETRIEVE_THRESHOLD`   | `0.93`                               | Used by the auto-retrieve hook     |
+| `AGENT_KMS_RETRIEVE_THRESHOLD`   | `0.83`                               | Used by the auto-retrieve hook     |
 
 ---
 
@@ -290,21 +316,20 @@ Apple-Silicon Macs with ≥18 GB unified memory.
 
 ## Limitations
 
-- The default embedding model (`multilingual-e5-base`) downloads ~1 GB on
-  first use. Run `agent-kms doctor` to check the cache.
-- **`score_threshold=0.93` is corpus-specific.** It was tuned on the
-  original migration project's corpus. On other Japanese technical
-  documentation corpora the empirical sweet spot has been observed in
-  the **0.80 – 0.85 range** (see [rag-evaluation-jp][rag-eval] for a
-  reproducible study on React JP / JS Primer JP). If `retrieve` returns
-  zero chunks on your data, sweep `score_threshold` downward in 0.01
-  steps starting from 0.85 before assuming the corpus is the problem.
-- **Embedding model choice is the largest lever on Japanese corpora.**
-  The same study found `cl-nagoya/ruri-v3-310m` (also 768d, drop-in
-  swap via `AGENT_KMS_MODEL`) raised F1 by ~80% over `multilingual-e5-base`
-  on Japanese-only documentation. agent-kms keeps `multilingual-e5-base`
-  as the default for broad applicability; consider switching when your
-  corpus is Japanese-heavy.
+- The default embedding model (`cl-nagoya/ruri-v3-310m`) downloads ~620 MB
+  on first use. Run `agent-kms doctor` to check the cache. If your corpus
+  is predominantly English, swap to `intfloat/multilingual-e5-base` (the
+  previous default, broader multilingual coverage, ~1 GB) via
+  `AGENT_KMS_MODEL` and re-ingest with `--reset`.
+- **`score_threshold=0.83` is corpus + model specific.** It was tuned for
+  the current default model on Japanese technical-documentation corpora
+  (see [rag-evaluation-jp][rag-eval] for a reproducible study on
+  React JP / JS Primer JP — F1-optimal in the 0.81–0.85 band). If you
+  swap the model or your corpus is predominantly English, recalibrate
+  with `agent-kms calibrate-threshold <queries.yaml>` (sweeps T in 0.01
+  steps over 0.78–0.94 and prints a P / R / F1 table). For the previous
+  `multilingual-e5-base` default the empirical sweet spot was ~0.93
+  because of its higher Japanese cosine baseline.
 
 [rag-eval]: https://github.com/spin-glass/rag-evaluation-jp
 - LLM-based lesson extraction is best-effort. Forbidden-vocab filters
