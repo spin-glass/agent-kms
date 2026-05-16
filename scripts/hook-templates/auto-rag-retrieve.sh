@@ -18,7 +18,7 @@
 #   - Qdrant unreachable
 #   - prompt missing fix/implementation/verify intent keywords
 #
-# Configure threshold via AGENT_KMS_RETRIEVE_THRESHOLD (default 0.93).
+# Configure threshold via AGENT_KMS_RETRIEVE_THRESHOLD (default 0.83).
 # =============================================================================
 
 set +e
@@ -32,7 +32,7 @@ INPUT=$(cat)
 QDRANT_URL="${QDRANT_URL:-http://localhost:6333}"
 curl -sSf -m 1 "${QDRANT_URL%/}/collections" >/dev/null 2>&1 || exit 0
 
-THRESHOLD="${AGENT_KMS_RETRIEVE_THRESHOLD:-0.93}"
+THRESHOLD="${AGENT_KMS_RETRIEVE_THRESHOLD:-0.83}"
 
 # Single Python pass: parse hook input, keyword-gate, call agent-kms,
 # emit context block, append JSONL log. Keeping it in one subshell avoids
@@ -46,7 +46,7 @@ THRESHOLD="${AGENT_KMS_RETRIEVE_THRESHOLD:-0.93}"
 HOOK_INPUT="$INPUT" THRESHOLD="$THRESHOLD" python3 - <<'PY'
 import json, os, re, subprocess, sys, time
 
-THRESHOLD = os.environ.get("THRESHOLD", "0.93")
+THRESHOLD = os.environ.get("THRESHOLD", "0.83")
 LOG_PATH = os.path.expanduser("~/.claude/logs/agent-kms-retrieve.jsonl")
 
 try:

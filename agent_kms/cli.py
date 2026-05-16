@@ -305,7 +305,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     pr = sub.add_parser("retrieve", help="One-off retrieve")
     pr.add_argument("query")
-    pr.add_argument("--threshold", type=float, default=0.93)
+    pr.add_argument("--threshold", type=float, default=0.83)
     pr.add_argument(
         "--json",
         action="store_true",

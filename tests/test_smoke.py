@@ -25,7 +25,7 @@ def test_config_loads_general_preset():
     assert cfg.preset == "general"
     assert cfg.collection == "agent_knowledge"
     assert any(s.kind == "markdown_h2" for s in cfg.sources)
-    assert cfg.score_threshold == 0.93
+    assert cfg.score_threshold == 0.83
 
 
 def test_load_prompt_general():

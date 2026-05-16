@@ -133,7 +133,7 @@ def load_config(preset: str | None = None) -> KMSConfig:
         "applicability_boost",
         {"universal": 0.0, "conditional": -0.005, "topic-specific": -0.015},
     )
-    score_threshold = float(retrieve.get("score_threshold", 0.93))
+    score_threshold = float(retrieve.get("score_threshold", 0.83))
 
     prompts_dir_str = merged.get("prompts", {}).get("dir")
     if prompts_dir_str:
