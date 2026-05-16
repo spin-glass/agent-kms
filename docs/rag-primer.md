@@ -99,8 +99,9 @@ E5 系は `passage:` / `query:` prefix を要求 (これを忘れると性能が
 > A: 全 chunk の vector を再計算 (= 全 ingest 再実行)。**閾値も再キャリブレーション必須** (cosine 分布が違う)。
 
 ### agent-kms の選択
-- デフォルト `intfloat/multilingual-e5-base` (汎用性、Apache 2.0)
-- 日本語コーパスでは `AGENT_KMS_MODEL=cl-nagoya/ruri-v3-310m` 推奨 (README Limitations、ベンチで +80% F1)
+- デフォルト `cl-nagoya/ruri-v3-310m` (日本語特化、Apache 2.0、768d、~620 MB)
+  — rag-evaluation-jp ベンチで `multilingual-e5-base` 比 F1 +80%
+- 英語中心コーパスでは `AGENT_KMS_MODEL=intfloat/multilingual-e5-base` に戻す (broader multilingual、~1 GB)
 
 ---
 

@@ -1,15 +1,17 @@
 """agent-kms CLI — single entry point for ingest / retrieve / serve / hooks.
 
 Subcommands:
-  init             Scaffold ``.agent-kms/kms.toml`` in CWD from a preset.
-  ingest           Run config-driven ingest into Qdrant.
-  retrieve         Run a one-off retrieve and print results.
-  serve            Start the MCP server (FastMCP stdio transport).
-  extract-lessons  Extract lessons from a transcript file → Qdrant.
-  postmortem       Extract long-window postmortem from a transcript.
-  improve          Run auto-improve gap detection on a transcript.
-  install-hooks    Copy Claude Code hook templates into a target repo.
-  doctor           Health check: Qdrant reachable, model cached, keys set.
+  init                  Scaffold ``.agent-kms/kms.toml`` in CWD from a preset.
+  ingest                Run config-driven ingest into Qdrant.
+  retrieve              Run a one-off retrieve and print results.
+  calibrate-threshold   Sweep ``score_threshold`` against a labelled query
+                        set and print a precision / recall / F1 table.
+  serve                 Start the MCP server (FastMCP stdio transport).
+  extract-lessons       Extract lessons from a transcript file → Qdrant.
+  postmortem            Extract long-window postmortem from a transcript.
+  improve               Run auto-improve gap detection on a transcript.
+  install-hooks         Copy Claude Code hook templates into a target repo.
+  doctor                Health check: Qdrant reachable, model cached, keys set.
 """
 
 from __future__ import annotations
@@ -86,6 +88,24 @@ def _cmd_retrieve(args: argparse.Namespace) -> int:
         print(f"  • [{r.get('source_type', '?')} {sev}/{app}] {src} #{heading} (score={score:.3f})")
         print(f"    {text}")
         print()
+    return 0
+
+
+def _cmd_calibrate_threshold(args: argparse.Namespace) -> int:
+    from .calibrate import run
+
+    queries_path = Path(args.queries).expanduser().resolve()
+    if not queries_path.exists():
+        print(f"queries file not found: {queries_path}", file=sys.stderr)
+        return 1
+    if args.t_min > args.t_max:
+        print(
+            f"--t-min ({args.t_min}) must be <= --t-max ({args.t_max})",
+            file=sys.stderr,
+        )
+        return 1
+    table = run(queries_path, args.t_min, args.t_max, args.t_step)
+    print(table)
     return 0
 
 
@@ -305,13 +325,35 @@ def build_parser() -> argparse.ArgumentParser:
 
     pr = sub.add_parser("retrieve", help="One-off retrieve")
     pr.add_argument("query")
-    pr.add_argument("--threshold", type=float, default=0.93)
+    pr.add_argument("--threshold", type=float, default=0.83)
     pr.add_argument(
         "--json",
         action="store_true",
         help="Output the raw retrieve result list as JSON (machine-readable).",
     )
     pr.set_defaults(func=_cmd_retrieve)
+
+    pcal = sub.add_parser(
+        "calibrate-threshold",
+        help=(
+            "Sweep score_threshold against a labelled query set "
+            "(YAML) and print a precision/recall/F1 table."
+        ),
+    )
+    pcal.add_argument(
+        "queries",
+        help=(
+            "Path to YAML file. Schema: list of {id?, query, gold:[{source, heading?}]}. "
+            "See examples/calibrate_queries.example.yaml."
+        ),
+    )
+    pcal.add_argument("--t-min", type=float, default=0.78,
+                      help="Sweep lower bound (default 0.78).")
+    pcal.add_argument("--t-max", type=float, default=0.94,
+                      help="Sweep upper bound, inclusive (default 0.94).")
+    pcal.add_argument("--t-step", type=float, default=0.01,
+                      help="Sweep step (default 0.01).")
+    pcal.set_defaults(func=_cmd_calibrate_threshold)
 
     ps = sub.add_parser("serve", help="Start FastMCP server")
     ps.set_defaults(func=_cmd_serve)

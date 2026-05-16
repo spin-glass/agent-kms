@@ -42,31 +42,28 @@ DEFAULT_SEVERITY_BOOST = {
 
 # applicability → additive score boost. Penalises narrow-topic chunks so they
 # only surface when cosine is strongly aligned (precision uplift without
-# sacrificing recall on truly relevant matches). Tuned 2026-05-13 from CAL-420
-# retrospective — topic-specific noise was bloating the main session context
-# despite the 0.93 threshold. universal chunks (= apply to ANY UI port) keep
-# their cosine intact; conditional chunks lose a hair; topic-specific chunks
-# need a clear topical hit (cosine >= 0.945 to pass 0.93 threshold after
-# -0.015) instead of riding the corpus baseline.
+# sacrificing recall on truly relevant matches). universal chunks (= apply to
+# ANY context) keep their cosine intact; conditional chunks lose a hair;
+# topic-specific chunks need a clear topical hit instead of riding the corpus
+# baseline.
 DEFAULT_APPLICABILITY_BOOST = {
     "universal": 0.0,
     "conditional": -0.005,
     "topic-specific": -0.015,
 }
 
-# Default cosine + boost score floor. Tuned empirically against the live
-# corpus on 2026-05-11:
+# Default cosine + boost score floor. Calibrate per corpus with
+# ``agent-kms calibrate-threshold`` against a small labelled query set.
 #
-#   threshold  relevant Q  irrelevant Q (noise)
-#   0.90       97 chunks   61 chunks  ← poor discrimination
-#   0.93       24 chunks    2 chunks  ← BEST: 12x ratio, broad context, low noise
-#   0.95        1 chunk     0 chunks  ← strict, may miss relevant
-#   0.97        0 chunks    0 chunks  ← too strict
-#
-# multilingual-e5-base has a high Japanese baseline cosine (~0.85-0.90)
-# from shared vocabulary/structure, so anything below 0.93 lets unrelated
-# Japanese text through. 0.93 is the sweet spot for this corpus.
-DEFAULT_SCORE_THRESHOLD = 0.93
+# 0.83 is tuned for ``cl-nagoya/ruri-v3-310m`` (the current default
+# embedding model) on Japanese technical-documentation corpora — empirical
+# F1-optimal in the 0.81–0.85 band on the spin-glass/rag-evaluation-jp
+# benchmark. If your corpus is predominantly English, or you swap to a
+# different model via ``AGENT_KMS_MODEL`` / ``score_threshold`` in
+# ``kms.toml``, recalibrate. The legacy default for
+# ``intfloat/multilingual-e5-base`` was 0.93 (higher Japanese cosine
+# baseline) — set that explicitly if reverting the model.
+DEFAULT_SCORE_THRESHOLD = 0.83
 
 # Safety cap on initial fetch. Threshold filters most, but prevents
 # pathological queries from pulling thousands of chunks.

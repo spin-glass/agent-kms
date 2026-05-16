@@ -19,7 +19,7 @@ from sentence_transformers import SentenceTransformer
 # (llm, retrieve, server, session_extract) gets keys without depending on store.
 
 COLLECTION = os.environ.get("AGENT_KMS_COLLECTION", "agent_knowledge")
-MODEL_NAME = os.environ.get("AGENT_KMS_MODEL", "intfloat/multilingual-e5-base")
+MODEL_NAME = os.environ.get("AGENT_KMS_MODEL", "cl-nagoya/ruri-v3-310m")
 VECTOR_SIZE = int(os.environ.get("AGENT_KMS_VECTOR_SIZE", "768"))
 
 

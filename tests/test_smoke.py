@@ -25,7 +25,7 @@ def test_config_loads_general_preset():
     assert cfg.preset == "general"
     assert cfg.collection == "agent_knowledge"
     assert any(s.kind == "markdown_h2" for s in cfg.sources)
-    assert cfg.score_threshold == 0.93
+    assert cfg.score_threshold == 0.83
 
 
 def test_load_prompt_general():
@@ -454,3 +454,78 @@ def test_ollama_end_to_end_generate(monkeypatch):
     )
     assert result.provider == "ollama"
     assert result.text.strip(), "expected non-empty text from Ollama"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# calibrate-threshold (no Qdrant — uses an in-process retrieve stub)
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_calibrate_precision_recall_f1_basic():
+    from agent_kms.calibrate import precision_recall_f1
+
+    retrieved = [
+        {"source": "/abs/a.md", "heading": "H1"},   # hit (basename + heading)
+        {"source": "b.md", "heading": "X"},          # miss
+    ]
+    gold = {("a.md", "H1"), ("c.md", "H2")}          # 2 expected, 1 hit
+    p, r, f1 = precision_recall_f1(retrieved, gold)
+    assert p == 0.5
+    assert r == 0.5
+    assert round(f1, 4) == 0.5
+
+
+def test_calibrate_gold_heading_optional_matches_any():
+    from agent_kms.calibrate import _gold_set, precision_recall_f1
+
+    gold = _gold_set({"gold": [{"source": "foo.yaml"}]})  # no heading
+    retrieved = [{"source": "/x/foo.yaml", "heading": "anything"}]
+    p, r, f1 = precision_recall_f1(retrieved, gold)
+    assert p == 1.0 and r == 1.0 and f1 == 1.0
+
+
+def test_calibrate_sweep_picks_best_f1(tmp_path):
+    from agent_kms.calibrate import frange, run
+
+    # Stub retrieve_fn: at low T returns both relevant + noise; at high T
+    # filters everything out. The F1-optimal threshold is in the middle.
+    relevant = {"source": "a.md", "heading": "H1", "score": 0.85}
+    noise = {"source": "noise.md", "heading": "N", "score": 0.80}
+
+    def fake_retrieve(query, score_threshold):
+        return [c for c in (relevant, noise) if c["score"] >= score_threshold]
+
+    queries_yaml = tmp_path / "q.yaml"
+    queries_yaml.write_text(
+        "- id: only\n"
+        "  query: q\n"
+        "  gold:\n"
+        "    - source: a.md\n"
+        "      heading: H1\n",
+        encoding="utf-8",
+    )
+    out = run(queries_yaml, 0.78, 0.90, 0.01, retrieve_fn=fake_retrieve)
+    # Best F1 marker should land at 0.81–0.85 band (relevant in, noise out)
+    assert "best F1" in out
+    best_lines = [
+        ln for ln in out.splitlines() if "best F1" in ln
+    ]
+    assert best_lines
+    # All "best F1" lines should have threshold strictly above noise (0.80)
+    # and at or below relevant (0.85)
+    for ln in best_lines:
+        t = float(ln.split()[0])
+        assert 0.81 <= t <= 0.85, ln
+
+    # Sanity: frange inclusive at both ends, no float drift.
+    rng = frange(0.78, 0.94, 0.01)
+    assert rng[0] == 0.78 and rng[-1] == 0.94
+
+
+def test_calibrate_load_queries_validates_schema(tmp_path):
+    from agent_kms.calibrate import load_queries
+
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("- query: missing gold\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="missing or empty 'gold'"):
+        load_queries(bad)

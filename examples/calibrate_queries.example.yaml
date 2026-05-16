@@ -1,0 +1,44 @@
+# Example query set for `agent-kms calibrate-threshold`.
+#
+# Run:
+#   agent-kms calibrate-threshold examples/calibrate_queries.example.yaml
+#
+# Schema (per item):
+#   id:      Optional. Used in error messages; defaults to index.
+#   query:   Required. The natural-language question, exactly as a user would
+#            phrase it (do NOT include any "passage: " / "query: " prefix —
+#            the embedding pipeline adds those).
+#   gold:    Required, non-empty. List of {source, heading?} entries naming
+#            the chunks that *should* be retrieved.
+#              - source:  Filename (basename); the absolute path the embedding
+#                         pipeline records is stripped before comparison, so
+#                         `instinct-foo.yaml` matches even if Qdrant stored
+#                         `/abs/path/.../data/instincts/instinct-foo.yaml`.
+#              - heading: H2 title for markdown_h2 sources. Omit to match any
+#                         chunk from the file (useful for yaml_file sources
+#                         where the chunk is the whole file).
+#
+# Tips for building a useful labelled set:
+#   - 20-30 queries is enough to be informative; more is better.
+#   - Pull queries from real session transcripts, NOT synthesised paraphrases
+#     of the chunk text — synthetic queries inflate scores.
+#   - Include 3-5 *negative* queries (no `gold` entries → omit them) only if
+#     you also want to measure false-positive rate; the current sweep does
+#     not score them, so the simplest form omits negatives entirely.
+
+- id: missing-frontmatter-fallback
+  query: "markdown ファイルに frontmatter が無いとき severity はどう決まる?"
+  gold:
+    - source: ingest.py
+      heading: Frontmatter handling
+
+- id: japanese-threshold
+  query: "Japanese corpus で retrieve が 0 件返ってくる、threshold をどう下げればいい?"
+  gold:
+    - source: README.md
+      heading: Limitations
+
+- id: yaml-instinct-confidence
+  query: "instinct YAML の confidence フィールドが retrieve スコアに反映されない"
+  gold:
+    - source: ingest.py  # heading omitted → any chunk from this file counts
